@@ -1,0 +1,16 @@
+{
+  "name": "@project-eden/narration-core",
+  "version": "1.0.0",
+  "description": "Dual-gate anti-hallucination narration pipeline for local LLM and deterministic templates",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "dependencies": {
+    "@project-eden/contracts": "file:../contracts"
+  },
+  "author": "muhammadTasin",
+  "license": "MIT"
+}

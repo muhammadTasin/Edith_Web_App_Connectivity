@@ -1,0 +1,1702 @@
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, viewport-fit=cover">
+  <title>মাঠের কথা (Mather Kotha) — Project EDEN · ফসল চক্র সিদ্ধান্ত সহায়ক প্ল্যাটফর্ম</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&family=Source+Serif+4:ital,opsz,wght@0,8..60,400..700;1,8..60,400..700&family=Work+Sans:wght@300;400;500;600;700&family=Hind+Siliguri:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <!--
+    Translations: every static text carries data-i18n="key". The Bangla text stays here in the HTML;
+    the English for each key lives in i18n.js. Dynamic text is built in app.js for the current language.
+  -->
+
+  <!-- TOP NAVIGATION HEADER -->
+  <header class="app-header">
+    <div class="header-left">
+      <!-- OFFICIAL MATHER KOTHA BRAND & EMBLEM -->
+      <div class="brand" onclick="switchScreen('screen-overview')" title="মাঠের কথা ড্যাশবোর্ড">
+        <svg class="brand-logo-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 60" width="190" height="48" fill="none">
+          <rect x="4" y="6" width="48" height="48" rx="14" fill="#1B5E20"/>
+          <path d="M12 42C18 36 28 36 34 40C40 44 48 40 48 40" stroke="#81C784" stroke-width="2.5" stroke-linecap="round"/>
+          <path d="M14 47C20 42 30 43 38 46" stroke="#C8E6C9" stroke-width="1.8" stroke-linecap="round"/>
+          <path d="M28 38V20M28 20C28 15 22 13 18 16C15 18.5 17 25 28 25M28 20C28 15 34 13 38 16C41 18.5 39 25 28 25" stroke="#FFFFFF" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+          <circle cx="28" cy="18" r="2.5" fill="#FFD54F"/>
+          <text x="62" y="31" font-family="'Noto Sans Bengali', 'Hind Siliguri', 'Segoe UI', sans-serif" font-size="20" font-weight="700" fill="#1B5E20">মাঠের কথা</text>
+          <text x="62" y="47" font-family="'Inter', 'Segoe UI', sans-serif" font-size="10" font-weight="600" fill="#558B2F" letter-spacing="0.4">MATHER KOTHA • শস্য চক্র</text>
+        </svg>
+        <span class="brand-badge" data-i18n="brand.verified">v2.4-স্বীকৃত</span>
+      </div>
+
+      <!-- LOCATION HIERARCHY & BLOCK SELECTOR -->
+      <div class="location-badge" onclick="promptBlockChange()" title="ব্লক পরিবর্তন করতে ক্লিক করুন" style="cursor: pointer;">
+        <span class="material-symbols-outlined geo-icon">location_on</span>
+        <div class="geo-hierarchy">
+          <span class="district" data-i18n="geo.district">রাজশাহী</span>
+          <span class="sep">›</span>
+          <span class="upazila" data-i18n="geo.upazila">তানোর</span>
+          <span class="sep">›</span>
+          <span class="union active" id="currentUnionLabel" data-i18n="geo.union">তালন্দ ইউনিয়ন</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="header-right">
+      <!-- DATA RELEASE BADGE & MANUAL SYNC TRIGGER -->
+      <div class="release-status" id="releaseStatusBadge" data-i18n-title="release.title" title="সর্বশেষ ডেটা রিলিজ সংস্করণ" onclick="triggerManualSync()">
+        <span class="status-dot pulse"></span>
+        <span class="release-tag" id="releaseTag">রিলিজ: …</span>
+        <button id="sync-trigger" class="btn-icon" style="background: none; border: none; cursor: pointer; display: inline-flex; align-items: center;" title="রিফ্রেশ করুন">
+          <span class="material-symbols-outlined" style="font-size: 15px; color: var(--primary);">sync</span>
+        </button>
+      </div>
+
+      <!-- OUR STORY & SCIENCE TRIGGER -->
+      <button class="header-story-btn" type="button" onclick="openStoryModal()">
+        <span class="material-symbols-outlined" style="font-size: 16px;">menu_book</span>
+        <span data-i18n="brand.story">আমাদের গল্প ও গবেষণা</span>
+      </button>
+
+      <!-- LANGUAGE TOGGLE -->
+      <div class="lang-switch">
+        <button id="langBn" class="lang-btn active" type="button" onclick="setLanguage('bn')">বাংলা</button>
+        <button id="langEn" class="lang-btn" type="button" onclick="setLanguage('en')">EN</button>
+      </div>
+
+      <!-- USER PROFILE & ROLE SWITCHER PILL -->
+      <button class="user-role-trigger" id="userRoleTrigger" type="button" onclick="openRoleModal()" title="ভূমিকা পরিবর্তন বা লগইন করুন">
+        <div class="avatar-dot" id="userAvatarDot" data-i18n="profile.avatar">উপ</div>
+        <div style="display: flex; flex-direction: column; text-align: left; line-height: 1.1;">
+          <span class="saao-name" id="saaoName" data-i18n="profile.name">নমুনা কর্মকর্তা</span>
+          <span class="saao-role" id="saaoRole" style="font-size: 10px; opacity: 0.85;" data-i18n="profile.role">SAAO, তালন্দ ব্লক</span>
+        </div>
+        <span class="material-symbols-outlined" style="font-size: 16px; margin-left: 2px;">expand_more</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- SCREEN TABS NAVIGATION (DESKTOP / TABLET) -->
+  <nav class="screen-nav">
+    <button class="nav-tab active" data-screen="screen-overview">
+      <span class="material-symbols-outlined tab-icon">dashboard</span>
+      <span data-i18n="nav.overview">ড্যাশবোর্ড ওভারভিউ</span>
+    </button>
+    <button class="nav-tab" data-screen="screen-planner">
+      <span class="material-symbols-outlined tab-icon">published_with_changes</span>
+      <span data-i18n="nav.planner">রোটেশন প্ল্যানার</span>
+    </button>
+    <button class="nav-tab" data-screen="screen-comparison">
+      <span class="material-symbols-outlined tab-icon">compare_arrows</span>
+      <span data-i18n="nav.comparison">৭-ডাইমেনশন তুলনা</span>
+    </button>
+    <button class="nav-tab" data-screen="screen-evidence">
+      <span class="material-symbols-outlined tab-icon">satellite_alt</span>
+      <span data-i18n="nav.evidence">স্যাটেলাইট প্রমাণ ও যুক্তি</span>
+    </button>
+    <button class="nav-tab" data-screen="screen-ipm">
+      <span class="material-symbols-outlined tab-icon">eco</span>
+      <span data-i18n="nav.ipm">পরিবেশ ও কম কীটনাশক</span>
+    </button>
+    <button class="nav-tab" data-screen="screen-officer">
+      <span class="material-symbols-outlined tab-icon">shield_person</span>
+      <span data-i18n="nav.officer">কৃষি কর্মকর্তা ডেস্ক</span>
+    </button>
+    <button class="nav-tab" data-screen="screen-farmer">
+      <span class="material-symbols-outlined tab-icon">agriculture</span>
+      <span data-i18n="nav.farmer">কৃষক পোর্টাল ও কিপ্যাড</span>
+    </button>
+    <button class="nav-tab" data-screen="screen-delivery">
+      <span class="material-symbols-outlined tab-icon">record_voice_over</span>
+      <span data-i18n="nav.delivery">অডিও প্রিভিউ ও কল ডেলিভারি</span>
+    </button>
+    <button class="nav-tab" data-screen="screen-companion">
+      <span class="material-symbols-outlined tab-icon">smartphone</span>
+      <span data-i18n="nav.companion">কৃষক মোবাইল সাথী</span>
+    </button>
+    <button class="nav-tab" data-screen="screen-quality">
+      <span class="material-symbols-outlined tab-icon">verified</span>
+      <span data-i18n="nav.quality">ডেটা মান ও ফ্রেশনেস</span>
+    </button>
+  </nav>
+
+  <!-- MAIN CONTAINER -->
+  <main class="main-container">
+
+    <!-- ==================================================================== -->
+    <!-- SCREEN 1: SAAO OVERVIEW DASHBOARD                                    -->
+    <!-- ==================================================================== -->
+    <section id="screen-overview" class="screen-section active">
+      <!-- Stitch: Hierarchy Location & Barind Tract Context Bar -->
+      <div class="overview-hero-bar">
+        <div class="overview-jurisdiction">
+          <div class="overview-jurisdiction-icon">
+            <span class="material-symbols-outlined">corporate_fare</span>
+          </div>
+          <div>
+            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+              <span class="badge badge-success" data-i18n="overview.barind">বরেন্দ্র অঞ্চল (AEZ-25)</span>
+              <span class="badge badge-primary" data-i18n="overview.medHigh">মাঝারি উঁচু জমি (Medium-High)</span>
+            </div>
+            <h2 style="font-family: var(--font-serif); font-size: 20px; color: var(--primary);" data-i18n="overview.blockTitle">তালন্দ ইউনিয়ন পরিষদ ব্লক</h2>
+          </div>
+        </div>
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <button class="btn btn-outline btn-sm" type="button" onclick="promptBlockChange()" data-i18n="overview.switchBlock">
+            <span class="material-symbols-outlined" style="font-size: 16px;">swap_horiz</span>
+            ব্লক পরিবর্তন
+          </button>
+        </div>
+      </div>
+
+      <!-- Stitch: 4 KPI Summary Cards -->
+      <div class="kpi-row">
+        <div class="kpi-card c-primary">
+          <div class="kpi-card-icon">
+            <span class="material-symbols-outlined">phone_in_talk</span>
+          </div>
+          <div>
+            <div class="kpi-val" id="kpiIvrCount">৩৪৭</div>
+            <div class="kpi-label" data-i18n="overview.kpiIvr">সক্রিয় আইভিআর রিমাইন্ডার</div>
+          </div>
+        </div>
+        <div class="kpi-card c-secondary">
+          <div class="kpi-card-icon">
+            <span class="material-symbols-outlined">schedule</span>
+          </div>
+          <div>
+            <div class="kpi-val" id="kpiPendingCount">৩৮</div>
+            <div class="kpi-label" data-i18n="overview.kpiPending">কল শিডিউল মুলতুবি</div>
+          </div>
+        </div>
+        <div class="kpi-card c-warning">
+          <div class="kpi-card-icon">
+            <span class="material-symbols-outlined">notifications_active</span>
+          </div>
+          <div>
+            <div class="kpi-val">১১৪</div>
+            <div class="kpi-label" data-i18n="overview.kpiNotice">অনুমোদনের অপেক্ষায় কৃষক</div>
+          </div>
+        </div>
+        <div class="kpi-card c-tertiary">
+          <div class="kpi-card-icon">
+            <span class="material-symbols-outlined">send</span>
+          </div>
+          <div>
+            <button class="btn btn-primary btn-sm" type="button" onclick="approveNotice()" data-i18n="overview.kpiApprove">
+              অনুমোদন করুন
+            </button>
+            <div class="kpi-label" style="margin-top: 4px;">অগ্রাধিকার বার্তা প্রেরণ</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Stitch: Primary Action Tactical CTA Button -->
+      <div style="margin-bottom: 20px;">
+        <button class="btn btn-primary btn-block" style="padding: 14px 20px; font-size: 16px; border-radius: var(--radius); justify-content: space-between;" type="button" onclick="switchScreen('screen-planner')">
+          <div style="display: flex; align-items: center; gap: 12px; text-align: left;">
+            <span class="material-symbols-outlined" style="font-size: 28px;">published_with_changes</span>
+            <div>
+              <strong style="display: block; font-size: 15px;" data-i18n="overview.startPlanner">+ নতুন ফসল চক্র তুলনা শুরু করুন</strong>
+              <span style="font-size: 12px; opacity: 0.9;">৬টি সূচকীয় সিমুলেশন: পানি, তাপ, বন্যা, মাটি, পশুখাদ্য, আয়</span>
+            </div>
+          </div>
+          <span class="material-symbols-outlined">arrow_forward</span>
+        </button>
+      </div>
+
+      <div class="overview-grid">
+        <!-- LEFT COLUMN: SUMMARY & ACTIONS -->
+        <div class="overview-left">
+          <div class="card banner-card">
+            <div class="banner-content">
+              <span class="season-badge" data-i18n="overview.season">বর্তমান মৌসুম: আমন ২০২৬</span>
+              <h2 data-i18n="overview.title">তালন্দ ইউনিয়ন: আমন থেকে রবি ফসল চক্র সিদ্ধান্ত</h2>
+              <p data-i18n="overview.lead">বরেন্দ্র অঞ্চলের মাঝারি উঁচু জমিতে ভূগর্ভস্থ পানির চাপ কমাতে, মাটি ভালো রাখতে ও কীটনাশক কমাতে ২৫ মৌসুমের নাসা ডেটার ভিত্তিতে ফসল চক্র বাছাই।</p>
+              <div class="banner-actions">
+                <button class="btn btn-primary" onclick="switchScreen('screen-planner')" data-i18n="overview.startPlanner">
+                  + নতুন ফসল চক্র তুলনা শুরু করুন
+                </button>
+                <button class="btn btn-secondary" onclick="switchScreen('screen-evidence')" data-i18n="overview.seeEvidence">
+                  স্যাটেলাইট প্রমাণাবলী দেখুন
+                </button>
+              </div>
+            </div>
+            <div class="banner-stat">
+              <span class="stat-number" data-num="25">২৫</span>
+              <span class="stat-label" data-i18n="overview.replayLabel">মৌসুমের হিস্টোরিক্যাল রি-প্লে</span>
+            </div>
+          </div>
+
+          <!-- SUMMARY METRIC CARDS -->
+          <div class="stats-row">
+            <div class="stat-card">
+              <div class="stat-icon water">💧</div>
+              <div class="stat-body">
+                <span class="stat-title" data-i18n="overview.rainTitle">বৃষ্টি, শেষ ৩০ দিন (NASA IMERG)</span>
+                <span class="stat-value" id="statRainValue">১৮০ মিমি</span>
+                <span class="stat-sub" id="statRainSub">স্বাভাবিকের ৭৪% (IMERG Late) • অনিশ্চিত</span>
+              </div>
+            </div>
+
+            <div class="stat-card">
+              <div class="stat-icon soil">🌱</div>
+              <div class="stat-body">
+                <span class="stat-title" data-i18n="overview.smapTitle">শিকড় অঞ্চলের আর্দ্রতা (NASA SMAP L4)</span>
+                <span class="stat-value" id="statSmapValue">০.৩১ m³/m³</span>
+                <span class="stat-sub" id="statSmapSub">সর্বশেষ ডেটা: ২৩ সেপ্টেম্বর; ২০২৩ সালে ০.৩২</span>
+              </div>
+            </div>
+
+            <div class="stat-card">
+              <div class="stat-icon crop">🌾</div>
+              <div class="stat-body">
+                <span class="stat-title" data-i18n="overview.varietyTitle">প্রস্তাবিত আমন জাত</span>
+                <span class="stat-value" id="statVarietyValue">ব্রি ধান৭১</span>
+                <span class="stat-sub" id="statVarietySub">১০ নভেম্বরের মধ্যে জমি খালি</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- RECENT ADVICE LOG -->
+          <div class="card">
+            <div class="card-header">
+              <h3 data-i18n="overview.farmersTitle">সাম্প্রতিক সুপারিশ ও কৃষক ফলো-আপ (তালন্দ ব্লক)</h3>
+              <span class="badge badge-warning" data-i18n="overview.sampleBadge">নমুনা সারি: কৃষক সাক্ষাৎকার বাকি</span>
+            </div>
+            <div class="table-responsive">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th data-i18n="overview.col.name">কৃষকের নাম</th>
+                    <th data-i18n="overview.col.village">গ্রাম ও জমি</th>
+                    <th data-i18n="overview.col.rotation">সুপারিশকৃত চক্র</th>
+                    <th data-i18n="overview.col.status">অবস্থা</th>
+                    <th data-i18n="overview.col.action">অ্যাকশন</th>
+                  </tr>
+                </thead>
+                <tbody id="recentFarmersTable">
+                  <tr>
+                    <td><strong>নমুনা কৃষক ০১</strong><br><span class="muted small">F01</span></td>
+                    <td>নমুনা গ্রাম ০১<br><span class="muted small">মাঝারি উঁচু জমি</span></td>
+                    <td><strong>ধান৭১ → মসুর</strong></td>
+                    <td><span class="badge badge-success">যাচাইকৃত</span></td>
+                    <td><button class="btn btn-sm btn-outline" onclick="openFarmerDossier('F01')">বিস্তারিত</button></td>
+                  </tr>
+                  <tr>
+                    <td><strong>নমুনা কৃষক ০২</strong><br><span class="muted small">F02</span></td>
+                    <td>নমুনা গ্রাম ০২<br><span class="muted small">মাঝারি উঁচু জমি</span></td>
+                    <td><strong>ধান৭১ → সরিষা</strong></td>
+                    <td><span class="badge badge-warning">অপেক্ষমাণ</span></td>
+                    <td><button class="btn btn-sm btn-outline" onclick="openFarmerDossier('F02')">বিস্তারিত</button></td>
+                  </tr>
+                  <tr>
+                    <td><strong>নমুনা কৃষক ০৩</strong><br><span class="muted small">F03</span></td>
+                    <td>নমুনা গ্রাম ০৩<br><span class="muted small">উঁচু জমি</span></td>
+                    <td><strong>ধান৭১ → আলু</strong></td>
+                    <td><span class="badge badge-success">যাচাইকৃত</span></td>
+                    <td><button class="btn btn-sm btn-outline" onclick="openFarmerDossier('F03')">বিস্তারিত</button></td>
+                  </tr>
+                  <tr>
+                    <td><strong>নমুনা কৃষক ০৪</strong><br><span class="muted small">F04</span></td>
+                    <td>নমুনা গ্রাম ০৪<br><span class="muted small">মাঝারি উঁচু জমি</span></td>
+                    <td><strong>ধান৭১ → ভুট্টা</strong></td>
+                    <td><span class="badge badge-warning">অপেক্ষমাণ (কলব্যাক)</span></td>
+                    <td><button class="btn btn-sm btn-outline" onclick="openFarmerDossier('F04')">বিস্তারিত</button></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Stitch: 9-Ward Hydrology & Drainage Matrix Diagram -->
+          <div class="card drainage-diagram-box">
+            <div class="card-header">
+              <h3 class="card-title" data-i18n="overview.drainageTitle">
+                <span class="material-symbols-outlined card-title-icon">grid_view</span>
+                তালন্দ ইউনিয়ন: নিষ্কাশন ও ভূগর্ভস্থ ভূ-স্তর
+              </h3>
+              <span class="badge badge-info" data-i18n="overview.drainageSub">৯টি ওয়ার্ড সূচক</span>
+            </div>
+            <div class="ward-legend">
+              <div class="ward-legend-item">
+                <span class="ward-legend-dot" style="background-color: #1b5e20;"></span>
+                <span data-i18n="overview.wardFavorable">অনুকূল নিষ্কাশন</span>
+              </div>
+              <div class="ward-legend-item">
+                <span class="ward-legend-dot" style="background-color: #75584d;"></span>
+                <span data-i18n="overview.wardDrought">খরা সংবেদনশীল</span>
+              </div>
+              <div class="ward-legend-item">
+                <span class="ward-legend-dot" style="background-color: #005684;"></span>
+                <span data-i18n="overview.wardDtw">বরেন্দ্র ডিপ-টিউবওয়েল জোন</span>
+              </div>
+            </div>
+            <svg aria-label="তালন্দ ইউনিয়ন ওয়ার্ড মানচিত্র" class="ward-map" viewBox="0 0 320 126">
+              <!-- Row 1: Wards 1, 2-3, 4 -->
+              <rect fill="#1b5e20" height="48" rx="6" width="92" x="10" y="8" stroke="#ffffff" stroke-opacity="0.35" stroke-width="1.5"></rect>
+              <text fill="#ffffff" font-size="11" font-weight="700" text-anchor="middle" x="56" y="29">ওয়ার্ড ১</text>
+              <text fill="#c7f9cc" font-size="8.5" font-weight="500" text-anchor="middle" x="56" y="44">উঁচু বোরো জোন</text>
+
+              <rect fill="#005684" height="48" rx="6" width="98" x="108" y="8" stroke="#ffffff" stroke-opacity="0.35" stroke-width="1.5"></rect>
+              <text fill="#ffffff" font-size="11" font-weight="700" text-anchor="middle" x="157" y="29">ওয়ার্ড ২ ও ৩</text>
+              <text fill="#e0f2fe" font-size="8.5" font-weight="500" text-anchor="middle" x="157" y="44">BMDA নলকূপ কভারেজ</text>
+
+              <rect fill="#75584d" height="48" rx="6" width="98" x="212" y="8" stroke="#ffffff" stroke-opacity="0.35" stroke-width="1.5"></rect>
+              <text fill="#ffffff" font-size="11" font-weight="700" text-anchor="middle" x="261" y="29">ওয়ার্ড ৪</text>
+              <text fill="#ffedd5" font-size="8.5" font-weight="500" text-anchor="middle" x="261" y="44">দ্রুত শুকানো ঢালু জমি</text>
+
+              <!-- Row 2: Wards 5-6, 7-8-9 -->
+              <rect fill="#005684" height="52" rx="6" width="146" x="10" y="64" stroke="#ffffff" stroke-opacity="0.35" stroke-width="1.5"></rect>
+              <text fill="#ffffff" font-size="11" font-weight="700" text-anchor="middle" x="83" y="87">ওয়ার্ড ৫ ও ৬ (তালন্দ বাজার)</text>
+              <text fill="#e0f2fe" font-size="8.5" font-weight="500" text-anchor="middle" x="83" y="103">মিশ্র রবি শাকসবজি</text>
+
+              <rect fill="#1b5e20" height="52" rx="6" width="148" x="162" y="64" stroke="#ffffff" stroke-opacity="0.35" stroke-width="1.5"></rect>
+              <text fill="#ffffff" font-size="11" font-weight="700" text-anchor="middle" x="236" y="87">ওয়ার্ড ৭, ৮, ৯ (কালিগঞ্জ বিল)</text>
+              <text fill="#c7f9cc" font-size="8.5" font-weight="500" text-anchor="middle" x="236" y="103">অনুকূল কাদা দোআঁশ</text>
+            </svg>
+            <p style="font-size: 11px; color: var(--on-surface-variant); text-align: center; margin-top: 6px;">
+              * বরেন্দ্র বহুমুখী উন্নয়ন কর্তৃপক্ষ (BMDA) এর বর্তমান ভূগর্ভস্থ পানির পাম্পিং সূচক সমন্বয়কৃত
+            </p>
+          </div>
+        </div>
+
+        <!-- RIGHT COLUMN: SATELLITE DATA & ALERTS -->
+        <div class="overview-right">
+          <div class="card">
+            <div class="card-header">
+              <h3 data-i18n="overview.satTitle">স্যাটেলাইট নজরদারি (তানোর পাইলট পয়েন্ট)</h3>
+              <span class="badge badge-info" id="dataDateBadge">…</span>
+            </div>
+            <div class="tanore-map-panel">
+              <div class="map-placeholder">
+                <div class="map-grid"></div>
+                <div class="map-pin">
+                  <div class="pin-pulse"></div>
+                  <span id="mapPinLabel">তানোর পাইলট পয়েন্ট</span>
+                </div>
+              </div>
+              <div class="map-specs">
+                <div class="spec-item">
+                  <span class="label" data-i18n="overview.spec.grid">নাসা গ্রিড:</span>
+                  <span class="val" data-i18n="overview.spec.gridValue">IMERG ০.১° (~১০ কিমি), SMAP L4 ৯ কিমি</span>
+                </div>
+                <div class="spec-item">
+                  <span class="label" data-i18n="overview.spec.soil">মাটি ও জমি (SRDI):</span>
+                  <span class="val" id="specSoil">…</span>
+                </div>
+                <div class="spec-item">
+                  <span class="label" data-i18n="overview.spec.groundwater">ভূগর্ভস্থ পানি (GRACE → GLDAS):</span>
+                  <span class="val" id="specGroundwater">…</span>
+                </div>
+                <div class="spec-item">
+                  <span class="label" data-i18n="overview.spec.greenness">শীতের ফসলের সবুজ (MODIS):</span>
+                  <span class="val" id="specGreenness">…</span>
+                </div>
+                <div class="spec-item">
+                  <span class="label" data-i18n="overview.spec.bmd">BMD গ্রাউন্ড স্টেশন:</span>
+                  <span class="val" id="specBmd">…</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- ACTIVE AGROMET ALERT -->
+          <div class="card alert-card">
+            <div class="alert-icon">⚠️</div>
+            <div class="alert-content">
+              <h4 id="alertTitle">…</h4>
+              <p id="alertText"></p>
+              <div class="alert-solution">
+                <strong data-i18n="overview.solution">সমাধান:</strong> <span id="alertSolution"></span>
+              </div>
+            </div>
+          </div>
+
+          <!-- FIELD PEST REPORTS (union level) -->
+          <div class="card">
+            <div class="card-header">
+              <h3 data-i18n="overview.pestTitle">মাঠের বালাই খবর (কর্মকর্তার পর্যবেক্ষণ)</h3>
+              <button class="btn btn-sm btn-secondary" onclick="switchScreen('screen-ipm')" data-i18n="overview.pestMore">কম কীটনাশকের উপায়</button>
+            </div>
+            <div id="overviewPestReports" class="pest-report-list"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- EARLY WARNINGS BEYOND THE ROTATION -->
+      <div class="warnings-heading">
+        <h2 data-i18n="warnings.title">আগাম সতর্কতা: নাসার তথ্যে মাঠ ও খামারের ঝুঁকি</h2>
+        <p class="subtitle" data-i18n="warnings.subtitle">ফসল চক্রের বাইরেও একই উপগ্রহ তথ্য কৃষককে আগে থেকে সাবধান করে।</p>
+      </div>
+      <div class="warnings-row">
+        <div class="card warning-card">
+          <div class="card-header">
+            <h3 data-i18n="warnings.haorTitle">হাওরে আকস্মিক বন্যা (ধর্মপাশা পাইলট)</h3>
+            <span class="badge" id="haorStatus">…</span>
+          </div>
+          <p class="warning-lead" id="haorRule"></p>
+          <div id="haorChart" class="mini-chart" role="img"></div>
+          <p class="chart-legend" id="haorLegend"></p>
+          <ul class="warning-list" id="haorFacts"></ul>
+        </div>
+        <div class="card warning-card">
+          <div class="card-header">
+            <h3 data-i18n="warnings.nightsTitle">আমনে ফুল আসার রাত গরম হচ্ছে</h3>
+            <span class="badge badge-warning" data-i18n="warnings.nightsBadge">কর্মকর্তার নজরে</span>
+          </div>
+          <ul class="warning-list" id="nightFacts"></ul>
+          <p class="warning-note" data-i18n="warnings.nightsNote">উৎস: নাসা POWER, বিএমডি স্টেশনের সাথে সংশোধিত; প্রবণতা Theil-Sen, তাৎপর্য Kendall (p &lt; ০.০৫)।</p>
+        </div>
+        <div class="card warning-card">
+          <div class="card-header">
+            <h3 data-i18n="warnings.cattleTitle">গবাদিপশুর তাপ চাপ (তানোর)</h3>
+            <span class="badge badge-danger" id="cattleBadge">…</span>
+          </div>
+          <p class="warning-lead" id="cattleLead"></p>
+          <div id="cattleChart" class="mini-chart" role="img"></div>
+          <ul class="warning-list" id="cattleFacts"></ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- ==================================================================== -->
+    <!-- SCREEN 2: ROTATION PLANNER                                           -->
+    <!-- ==================================================================== -->
+    <section id="screen-planner" class="screen-section">
+      <!-- Stitch: Guided Setup & Context Filter Card -->
+      <div class="card" style="margin-bottom: 20px;">
+        <div class="card-header">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span class="material-symbols-outlined" style="color: var(--primary);">tune</span>
+            <h2 class="card-title" data-i18n="planner.landSpecs">পরিকল্পনা ও জমির শর্তাবলী</h2>
+          </div>
+          <span class="badge badge-primary" data-i18n="planner.step1">ধাপ ১/২</span>
+        </div>
+        <div class="kpi-row" style="margin-bottom: 16px;">
+          <div style="background: var(--surface-container-low); padding: 10px 14px; border-radius: var(--radius-sm);">
+            <span style="font-size: 11px; color: var(--on-surface-variant); display: block;" data-i18n="planner.union">ইউনিয়ন ও অবস্থান</span>
+            <span style="font-size: 13.5px; font-weight: 700; color: var(--on-surface);" data-i18n="planner.landVal">তালন্দ, তানোর | মাঝারি উঁচু জমি</span>
+          </div>
+          <div style="background: var(--surface-container-low); padding: 10px 14px; border-radius: var(--radius-sm);">
+            <span style="font-size: 11px; color: var(--on-surface-variant); display: block;">ভূগর্ভস্থ সেচ ব্যবস্থা</span>
+            <span style="font-size: 13.5px; font-weight: 700; color: var(--on-surface);" data-i18n="planner.dtwVal">সীমিত বরেন্দ্র ডিপ টিউবওয়েল</span>
+          </div>
+        </div>
+
+        <!-- Stitch: Kharif-2 Aman Crop Selector Toggle -->
+        <div style="margin-bottom: 16px;">
+          <label style="font-size: 13px; font-weight: 600; color: var(--on-surface-variant); display: block; margin-bottom: 8px;" data-i18n="planner.amanLabel">
+            বর্তমান/প্রস্তাবিত রোপা আমন জাত নির্ধারণ:
+          </label>
+          <div class="aman-selector-grid">
+            <button class="aman-card-btn active" id="aman-opt-1" type="button" onclick="selectAmanVariety('BRRI dhan71')">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                <strong style="font-size: 14px;">ব্রি ধান৭১</strong>
+                <span class="material-symbols-outlined" style="font-size: 18px;">check_circle</span>
+              </div>
+              <span style="font-size: 12px; opacity: 0.9;" data-i18n="planner.dhan71Short">স্বল্পমেয়াদী (১১৪ দিন, খরা সহনশীল)</span>
+            </button>
+            <button class="aman-card-btn" id="aman-opt-2" type="button" onclick="selectAmanVariety('BRRI dhan49')">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                <strong style="font-size: 14px;">ব্রি ধান৪৯</strong>
+                <span class="material-symbols-outlined" style="font-size: 18px; opacity: 0.5;">radio_button_unchecked</span>
+              </div>
+              <span style="font-size: 12px; opacity: 0.9;" data-i18n="planner.dhan49Long">দীর্ঘমেয়াদী (১৩৫ দিন, প্রচলিত)</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Stitch: Priorities Filter Pills -->
+        <div>
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <label style="font-size: 13px; font-weight: 600; color: var(--on-surface-variant);" data-i18n="planner.prefLabel">
+              কৃষকের প্রধান অগ্রাধিকার (Officer &amp; Farmer Preference):
+            </label>
+          </div>
+          <div class="priority-pills-bar">
+            <button class="priority-pill active" id="pill-water" type="button" onclick="setPriorityPill('water')">
+              <span class="material-symbols-outlined" style="font-size: 16px;">water_drop</span>
+              <span data-i18n="planner.pillWater">১. পানি সাশ্রয়</span>
+            </button>
+            <button class="priority-pill" id="pill-income" type="button" onclick="setPriorityPill('income')">
+              <span class="material-symbols-outlined" style="font-size: 16px;">payments</span>
+              <span data-i18n="planner.pillIncome">২. সর্বোচ্চ আয়</span>
+            </button>
+            <button class="priority-pill" id="pill-soil" type="button" onclick="setPriorityPill('soil')">
+              <span class="material-symbols-outlined" style="font-size: 16px;">compost</span>
+              <span data-i18n="planner.pillSoil">৩. মাটির উর্বরতা</span>
+            </button>
+            <button class="priority-pill" id="pill-pest" type="button" onclick="setPriorityPill('pest')">
+              <span class="material-symbols-outlined" style="font-size: 16px;">eco</span>
+              <span data-i18n="planner.pillFodder">৪. কম কীটনাশক / পশুখাদ্য</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- CANDIDATE ROTATIONS CONTAINER -->
+      <div class="planner-layout">
+        <div class="planner-controls card" style="display: none;">
+          <!-- Hidden compatibility elements to support engine scripts -->
+          <select id="planUnion"><option value="talanda_tanore"></option></select>
+          <div class="btn-group">
+            <button class="btn btn-outline" id="btnLandHigh" onclick="setLandType('high')"></button>
+            <button class="btn btn-outline active" id="btnLandMedHigh" onclick="setLandType('medium_high')"></button>
+            <button class="btn btn-outline" id="btnLandMedLow" onclick="setLandType('medium_low')"></button>
+            <button class="btn btn-outline" id="btnLandLow" onclick="setLandType('low')"></button>
+          </div>
+          <select id="planAmanCrop">
+            <option value="BRRI dhan71">ব্রি ধান৭১</option>
+            <option value="BRRI dhan87">ব্রি ধান৮৭</option>
+            <option value="BRRI dhan103">ব্রি ধান১০৩</option>
+            <option value="BRRI dhan49">ব্রি ধান৪৯</option>
+            <option value="BRRI dhan75">ব্রি ধান৭৫</option>
+          </select>
+          <input type="range" id="weightWater" value="50" oninput="updateWeights()">
+          <input type="range" id="weightIncome" value="20" oninput="updateWeights()">
+          <input type="range" id="weightSoil" value="20" oninput="updateWeights()">
+          <input type="range" id="weightPest" value="10" oninput="updateWeights()">
+          <span id="valWeightWater">৫০%</span><span id="valWeightIncome">২০%</span><span id="valWeightSoil">২০%</span><span id="valWeightPest">১০%</span>
+        </div>
+
+        <div class="planner-results">
+          <div class="results-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <h3 style="font-family: var(--font-serif); font-size: 19px; color: var(--primary);" data-i18n="planner.candidatesTitle">প্রস্তাবিত ফসল চক্র মূল্যায়ন</h3>
+              <span class="badge badge-primary" id="plannerCountBadge">৫টি বিকল্প</span>
+            </div>
+            <span style="font-size: 12px; color: var(--primary); font-weight: 600;">
+              <span class="material-symbols-outlined" style="font-size: 14px;">auto_graph</span>
+              ২৫ বর্ষ সিমুলেশন
+            </span>
+          </div>
+
+          <!-- Dynamic Rotation Option Cards -->
+          <div id="activeRotationOptions" class="rotation-options-list"></div>
+
+          <!-- Stitch: Interactive Controls Section (Add custom crop & 6-Dimension Inspection) -->
+          <div style="display: flex; flex-direction: column; gap: 12px; margin-top: 20px;">
+            <button class="btn btn-outline" style="border-style: dashed; padding: 12px; border-width: 2px;" type="button" onclick="openAddCropModal()" data-i18n="planner.addCustom">
+              <span class="material-symbols-outlined">add_circle</span>
+              + নতুন শস্য বিকল্প যোগ করুন (Custom Crop Candidate)
+            </button>
+            <button class="btn btn-secondary" style="padding: 12px;" type="button" onclick="openDimensionModal()" data-i18n="planner.inspect6D">
+              <span class="material-symbols-outlined">compare_arrows</span>
+              বিস্তারিত ৬-মাত্রিক তুলনা দেখুন (Inspect 6-Dimension)
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ==================================================================== -->
+    <!-- SCREEN 3: 7-DIMENSION COMPARISON                                     -->
+    <!-- ==================================================================== -->
+    <section id="screen-comparison" class="screen-section">
+      <div class="card">
+        <h2 data-i18n="comp.title">৭-ডাইমেনশন বিস্তারিত তুলনা ম্যাট্রিক্স</h2>
+        <p class="lead-paragraph" data-i18n="comp.intro">
+          মাঝারি উঁচু জমিতে বিভিন্ন ফসল চক্রের উপযোগিতা এবং ২৫ মৌসুমের স্যাটেলাইট অভিজ্ঞতার তুলনামূলক বিশ্লেষণ।
+        </p>
+        <div class="table-responsive">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th data-i18n="comp.col.rotation">ফসল চক্র</th>
+                <th data-i18n="comp.col.water">পানি সাশ্রয়</th>
+                <th data-i18n="comp.col.heat">তাপ সহনশীলতা</th>
+                <th data-i18n="comp.col.flood">বন্যা নিরাপত্তা</th>
+                <th data-i18n="comp.col.soil">মাটির উর্বরতা</th>
+                <th data-i18n="comp.col.fodder">পশুখাদ্য</th>
+                <th data-i18n="comp.col.income">সম্ভাব্য আয়</th>
+                <th data-i18n="comp.col.pest">কম কীটনাশক</th>
+                <th data-i18n="comp.col.score">মোট স্কোর</th>
+              </tr>
+            </thead>
+            <tbody id="comparisonTableBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ==================================================================== -->
+    <!-- SCREEN 4: SATELLITE EVIDENCE & REPLAY                                 -->
+    <!-- ==================================================================== -->
+    <section id="screen-evidence" class="screen-section">
+      <div class="card">
+        <h2 data-i18n="evidence.title">স্যাটেলাইট উপাত্তের ভিত্তি ও ২৫ মৌসুমের প্রমাণ</h2>
+        <p class="lead-paragraph" data-i18n="evidence.intro">
+          নাসা এবং বিএমডি-এর ঐতিহাসিক তথ্যের ওপর ভিত্তি করে প্রতিটি সিদ্ধান্তের বৈজ্ঞানিক যুক্তি এখানে সংরক্ষিত।
+        </p>
+        <div class="table-responsive">
+          <table class="data-table ledger-table">
+            <thead>
+              <tr>
+                <th data-i18n="evidence.col.crop">ফসল চক্র</th>
+                <th data-i18n="evidence.col.irrigation">সেচের পানি (মিমি)</th>
+                <th data-i18n="evidence.col.heatDays">চরম গরমের দিন</th>
+                <th data-i18n="evidence.col.freeDate">জমি খালি হওয়ার তারিখ</th>
+                <th data-i18n="evidence.col.soilCarbon">জৈব কার্বন বৃদ্ধি</th>
+              </tr>
+            </thead>
+            <tbody id="ledgerTable"></tbody>
+          </table>
+        </div>
+        <p style="font-size: 12px; color: var(--on-surface-variant); margin-top: 10px;" id="evGroundText"></p>
+      </div>
+    </section>
+
+    <!-- ==================================================================== -->
+    <!-- SCREEN 5: IPM & ENVIRONMENT                                          -->
+    <!-- ==================================================================== -->
+    <section id="screen-ipm" class="screen-section">
+      <div class="card">
+        <h2 data-i18n="ipm.title">পরিবেশবান্ধব বালাই ব্যবস্থাপনা ও কীটনাশক হ্রাস</h2>
+        <p class="lead-paragraph" data-i18n="ipm.intro">
+          ধান-ডাল-তেলজাতীয় শস্যের সুষম চক্রের মাধ্যমে বালাইচক্র ভেঙে রাসায়নিক কীটনাশক প্রয়োগের প্রয়োজনীয়তা উল্লেখযোগ্যভাবে কমানো সম্ভব।
+        </p>
+        <div class="ipm-compare-grid">
+          <div class="ipm-column recommended">
+            <h4 data-i18n="ipm.colRec">প্রস্তাবিত চক্র (ধান-মসুর/সরিষা)</h4>
+            <div class="ipm-score" id="ipmScoreRec">০.৯০</div>
+            <ul class="kv-list">
+              <li><span>বালাই চাপ হ্রাসের হার:</span> <strong>৬৫% কম</strong></li>
+              <li><span>প্রাকৃতিক শত্রু কীট সংরক্ষণ:</span> <strong>অনুকূল</strong></li>
+            </ul>
+          </div>
+          <div class="ipm-column baseline">
+            <h4 data-i18n="ipm.colBase">প্রচলিত চক্র (আমন-পতিত-বোরো)</h4>
+            <div class="ipm-score" id="ipmScoreBase">০.৩১</div>
+            <ul class="kv-list">
+              <li><span>বালাই পুনরাবৃত্তির হার:</span> <strong>উচ্চ</strong></li>
+              <li><span>কীটনাশক খরচের চাপ:</span> <strong>৳ ১,৮৫০ /বিঘা</strong></li>
+            </ul>
+          </div>
+        </div>
+        <div style="margin-top: 20px;">
+          <h3 style="font-size: 16px; margin-bottom: 10px;" data-i18n="ipm.stepsTitle">আইপিএম (IPM) কার্যকর করার পদক্ষেপ:</h3>
+          <ul class="ipm-steps" id="ipmSteps"></ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- ==================================================================== -->
+    <!-- SCREEN 6: KRISHI OFFICER DESK & FIELD-CHECK DETAIL                   -->
+    <!-- ==================================================================== -->
+    <section id="screen-officer" class="screen-section">
+      <!-- Officer Sign-In Box -->
+      <div class="card" id="officerLoginBox">
+        <div class="card-header">
+          <h2 data-i18n="officer.title">কৃষি কর্মকর্তা ডেস্ক</h2>
+          <span class="badge badge-warning" id="officerStateBadge" data-i18n="officer.lockedBadge">শুধু কর্মকর্তাদের জন্য</span>
+        </div>
+        <p class="subtitle" data-i18n="officer.intro">কৃষক কিপ্যাডে ৯ চাপলে বা মাঠে সমস্যা হলে সেটি এখানে আসে। কর্মকর্তা জমি দেখে যা লেখেন, সেই তথ্য কৃষকের পরামর্শে অগ্রাধিকার পায়।</p>
+        <form id="officerLogin" class="officer-login" onsubmit="officerSignIn(event)">
+          <div class="form-group">
+            <label for="officerSelect" data-i18n="officer.idLabel">কর্মকর্তা</label>
+            <select id="officerSelect" class="form-control"></select>
+          </div>
+          <div class="form-group">
+            <label for="officerCode" data-i18n="officer.codeLabel">প্রবেশ কোড</label>
+            <input id="officerCode" type="password" class="form-control" autocomplete="off" value="talanda-demo">
+          </div>
+          <button class="btn btn-primary" type="submit" data-i18n="officer.signIn">প্রবেশ করুন</button>
+          <p class="officer-hint" data-i18n="officer.codeHint">ডেমো কোড README-তে আছে। এটি ডেমোর জন্য, আসল লগইন নয়।</p>
+          <p class="officer-error" id="officerLoginError" hidden></p>
+        </form>
+      </div>
+
+      <!-- Officer Workspace (Shown when signed in) -->
+      <div id="officerWorkspace" hidden>
+        <!-- Stitch: Farmer Case Field-Check Detail Interface -->
+        <div class="card" style="border-left: 5px solid var(--primary); margin-bottom: 20px;">
+          <!-- Breadcrumb navigation -->
+          <div style="display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--on-surface-variant); margin-bottom: 12px;">
+            <span class="material-symbols-outlined" style="font-size: 16px;">dashboard</span>
+            <span style="cursor: pointer;" onclick="switchScreen('screen-overview')">ড্যাশবোর্ড</span>
+            <span>›</span>
+            <span>পরামর্শ কিউ</span>
+            <span>›</span>
+            <span style="font-weight: 700; color: var(--primary);" data-i18n="fieldcheck.caseNo">কেস #FK-9042 (মোঃ রফিকুল ইসলাম)</span>
+          </div>
+
+          <!-- Split View Layout: Dossier & Photo Log vs Inspection Form -->
+          <div class="field-check-grid">
+            <!-- Left: Farmer Dossier & Remote Sensing -->
+            <div>
+              <div class="dossier-card">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                  <div style="display: flex; align-items: center; gap: 6px;">
+                    <span class="material-symbols-outlined" style="color: var(--primary);">badge</span>
+                    <h3 style="font-size: 16px;" data-i18n="fieldcheck.dossierTitle">কৃষকের নথি ও পরিচয়পত্র</h3>
+                  </div>
+                  <span class="badge badge-success" data-i18n="fieldcheck.verifiedDae">DAE ভেরিফাইড</span>
+                </div>
+                <div class="dossier-row">
+                  <div><span class="dossier-k" data-i18n="fieldcheck.phoneLabel">মোবাইল ফোন</span><p class="dossier-v">০১৭১৭-***২৩৩</p></div>
+                  <div><span class="dossier-k" data-i18n="fieldcheck.nidLabel">জাতীয় পরিচয়পত্র</span><p class="dossier-v">************১৯০২</p></div>
+                </div>
+                <div class="dossier-row">
+                  <div><span class="dossier-k" data-i18n="fieldcheck.areaLabel">জমির আয়তন</span><p class="dossier-v" data-i18n="fieldcheck.areaVal">২.৫ বিঘা (৮২ শতাংশ)</p></div>
+                  <div><span class="dossier-k" data-i18n="fieldcheck.soilLabel">মাটির ধরন</span><p class="dossier-v" data-i18n="fieldcheck.soilVal">পলি-দোআঁশ (Silty Loam)</p></div>
+                </div>
+                <div class="dossier-row">
+                  <div><span class="dossier-k" data-i18n="fieldcheck.currentCropLabel">বর্তমান ফসল</span><p class="dossier-v" style="color: var(--primary);">ব্রি ধান-২৮ (বোরো)</p></div>
+                  <div><span class="dossier-k" data-i18n="fieldcheck.sowingLabel">রোপণের তারিখ</span><p class="dossier-v">১৫ জানুয়ারি ২০২৫</p></div>
+                </div>
+
+                <!-- Remote Sensing Sentinel-2 & Ground Sensors -->
+                <div style="margin-top: 14px; background: var(--surface-container-low); padding: 12px; border-radius: var(--radius-sm);">
+                  <div style="display: flex; justify-content: space-between; font-size: 11.5px; font-weight: 600; color: var(--primary); margin-bottom: 6px;">
+                    <span data-i18n="fieldcheck.ndvILabel">Sentinel-2 NDVI: 0.68 (উচ্চ স্বাস্থ্য)</span>
+                    <span data-i18n="fieldcheck.moistureLabel">আর্দ্রতা: ৩৫% (সন্তোষজনক)</span>
+                  </div>
+                  <div class="photo-log-grid">
+                    <div class="photo-log-item">
+                      <img src="https://images.unsplash.com/photo-1586771107445-d3ca888129ff?auto=format&fit=crop&w=400&q=80" alt="Rice field canopy">
+                      <span class="caption">কুশি স্তর (ধানগাছের গোড়া)</span>
+                    </div>
+                    <div class="photo-log-item">
+                      <img src="https://images.unsplash.com/photo-1592982537447-7440770cbfc9?auto=format&fit=crop&w=400&q=80" alt="Field check inspection">
+                      <span class="caption">পাতা ও সেচ পরিস্থিতি</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Right: Interactive SAAO Field Inspection Form -->
+            <div>
+              <div class="dossier-card">
+                <h3 style="font-size: 16px; margin-bottom: 12px; color: var(--primary);" data-i18n="fieldcheck.formTitle">মাঠ পরিদর্শন ও প্রেসক্রিপশন প্রটোকল</h3>
+
+                <!-- 1. Crop Stage -->
+                <div style="margin-bottom: 14px;">
+                  <label style="font-size: 12.5px; font-weight: 600; color: var(--on-surface-variant); display: block; margin-bottom: 6px;" data-i18n="fieldcheck.stageLabel">
+                    ১. ফসলের বৃদ্ধির ধাপ (Crop Growth Stage)
+                  </label>
+                  <div style="display: flex; gap: 8px;">
+                    <label class="btn btn-outline btn-sm" style="flex: 1; cursor: pointer;">
+                      <input type="radio" name="crop_stage" value="seedling">
+                      <span data-i18n="fieldcheck.stage1">চারা (Seedling)</span>
+                    </label>
+                    <label class="btn btn-primary btn-sm" style="flex: 1; cursor: pointer;">
+                      <input type="radio" name="crop_stage" value="tillering" checked>
+                      <span data-i18n="fieldcheck.stage2">কুশি (Tillering)</span>
+                    </label>
+                    <label class="btn btn-outline btn-sm" style="flex: 1; cursor: pointer;">
+                      <input type="radio" name="crop_stage" value="booting">
+                      <span data-i18n="fieldcheck.stage3">থোড় (Booting)</span>
+                    </label>
+                  </div>
+                </div>
+
+                <!-- 2. Pest Severity Sliders -->
+                <div style="margin-bottom: 14px;">
+                  <label style="font-size: 12.5px; font-weight: 600; color: var(--on-surface-variant); display: block; margin-bottom: 6px;" data-i18n="fieldcheck.pestLabel">
+                    ২. বালাই ও রোগ নিরীক্ষা (Pest &amp; Disease Severity)
+                  </label>
+                  <div class="severity-row">
+                    <span style="font-size: 12.5px; font-weight: 600; min-width: 140px;" data-i18n="fieldcheck.pestBlast">ধানের ব্লাস্ট (Blast)</span>
+                    <input type="range" class="severity-slider" id="sliderBlast" min="0" max="2" value="1" oninput="updateFieldPestSliders()">
+                    <span class="badge badge-warning" id="badgeBlastVal">মাঝারি (Tier-2)</span>
+                  </div>
+                  <div class="severity-row">
+                    <span style="font-size: 12.5px; font-weight: 600; min-width: 140px;" data-i18n="fieldcheck.pestBph">বাদামি গাছফড়িং (BPH)</span>
+                    <input type="range" class="severity-slider" id="sliderBph" min="0" max="2" value="0" oninput="updateFieldPestSliders()">
+                    <span class="badge badge-neutral" id="badgeBphVal">নেই / নিরাপদ</span>
+                  </div>
+                  <label style="display: flex; align-items: center; gap: 8px; font-size: 12.5px; margin-top: 6px; cursor: pointer;">
+                    <input type="checkbox" id="checkPestFree" onchange="togglePestFree(this.checked)">
+                    <span data-i18n="fieldcheck.pestFree">প্লট সম্পূর্ণরূপে বালাইমুক্ত (Pest-Free Verified)</span>
+                  </label>
+                </div>
+
+                <!-- 3. Irrigation Status -->
+                <div style="margin-bottom: 14px;">
+                  <label style="font-size: 12.5px; font-weight: 600; color: var(--on-surface-variant); display: block; margin-bottom: 6px;" data-i18n="fieldcheck.irrigLabel">
+                    ৩. সেচ ও পানি নিষ্কাশন অবস্থা (Irrigation Status)
+                  </label>
+                  <div style="display: flex; gap: 8px;">
+                    <label class="btn btn-outline btn-sm" style="flex: 1; cursor: pointer;">
+                      <input type="radio" name="fc_irrigation" value="satisfactory" checked>
+                      <span data-i18n="fieldcheck.irrigGood">সন্তোষজনক</span>
+                    </label>
+                    <label class="btn btn-outline btn-sm" style="flex: 1; cursor: pointer;">
+                      <input type="radio" name="fc_irrigation" value="excessive">
+                      <span data-i18n="fieldcheck.irrigExcess">অতিরিক্ত পানি</span>
+                    </label>
+                    <label class="btn btn-outline btn-sm" style="flex: 1; cursor: pointer;">
+                      <input type="radio" name="fc_irrigation" value="deficient">
+                      <span data-i18n="fieldcheck.irrigDeficit">পানি ঘাটতি</span>
+                    </label>
+                  </div>
+                </div>
+
+                <!-- 4. Prescription Textarea & Quick Preset -->
+                <div style="margin-bottom: 14px;">
+                  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                    <label style="font-size: 12.5px; font-weight: 600; color: var(--on-surface-variant);" data-i18n="fieldcheck.rxLabel">
+                      ৪. কর্মকর্তার বিশেষ প্রেসক্রিপশন ও নির্দেশনা
+                    </label>
+                    <button class="btn btn-outline btn-sm" type="button" onclick="loadBlastPreset()" data-i18n="fieldcheck.loadPreset" style="font-size: 11px; padding: 2px 8px; min-height: 28px;">
+                      <span class="material-symbols-outlined" style="font-size: 13px;">auto_fix_high</span>
+                      আদর্শ ব্লাস্ট প্রটোকল
+                    </button>
+                  </div>
+                  <textarea id="fcAdvisoryNotes" class="form-control" rows="3" oninput="updateCharCount(this.value)">বোরো ব্রি-২৮ ধানক্ষেতে হালকা ব্লাস্টের প্রাথমিক উপসর্গ পরিলক্ষিত হয়েছে। অবিলম্বে জমিতে অতিরিক্ত ইউরিয়া প্রয়োগ বন্ধ রাখুন। প্রতি লিটার পানিতে ট্রাইসাইক্লাজোল (যেমন: ট্রুপার/দিফা) ০.৮ গ্রাম মিশিয়ে বিকেলের রোদে স্প্রে করুন। আগামী ৩ দিন জমিতে ২ ইঞ্চি পরিমিত পানি ধরে রাখুন।</textarea>
+                  <div style="display: flex; justify-content: space-between; font-size: 11px; color: var(--on-surface-variant); margin-top: 4px;">
+                    <span>* এসএমএস ও মোবাইল অ্যাপে সরাসরি যাবে</span>
+                    <span id="fcCharCount">২২৪ অক্ষর</span>
+                  </div>
+                </div>
+
+                <!-- 5. Verification Seal Toggle -->
+                <div class="toggle-switch-wrap">
+                  <div style="display: flex; align-items: center; gap: 8px;">
+                    <span class="material-symbols-outlined" style="font-size: 24px; color: var(--secondary);">verified</span>
+                    <div>
+                      <strong style="font-size: 13px; display: block;" data-i18n="fieldcheck.sealTitle">সরকারি যাচাইকরণ সিল (SAAO Certification)</strong>
+                      <span style="font-size: 11px; color: var(--on-surface-variant);">ডিজিটাল রেজিস্ট্রি কোড #VRF-2025-0814</span>
+                    </div>
+                  </div>
+                  <label class="toggle-switch">
+                    <input type="checkbox" id="sealToggle" checked onchange="toggleSealLabel(this.checked)">
+                    <span class="slider-round"></span>
+                  </label>
+                </div>
+
+                <!-- 6. Action Buttons Bar -->
+                <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; flex-wrap: wrap;">
+                  <button class="btn btn-outline btn-sm" type="button" onclick="rescheduleVisit()" data-i18n="fieldcheck.rescheduleBtn">
+                    <span class="material-symbols-outlined" style="font-size: 15px;">calendar_clock</span>
+                    পুনরায় শিডিউল
+                  </button>
+                  <button class="btn btn-outline btn-sm" type="button" onclick="markVisited()" data-i18n="fieldcheck.visitedBtn">
+                    <span class="material-symbols-outlined" style="font-size: 15px;">check</span>
+                    ভিজিট সম্পন্ন
+                  </button>
+                  <button class="btn btn-primary" id="btnDispatchAdvice" type="button" onclick="dispatchFieldAdvice()" data-i18n="fieldcheck.dispatchBtn">
+                    <span class="material-symbols-outlined" style="font-size: 16px;">send_and_archive</span>
+                    এসএমএস ও অ্যাপে পরামর্শ পাঠান
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Priority Queue & Observation Form for other farmers -->
+        <div class="officer-grid">
+          <div class="card">
+            <div class="card-header">
+              <h3 data-i18n="officer.queueTitle">অগ্রাধিকার তালিকা (কল-ব্যাক ও ঝুঁকি)</h3>
+              <div class="officer-actions">
+                <button class="btn btn-sm btn-secondary" type="button" onclick="officerReset()" data-i18n="officer.reset">নমুনা তথ্যে ফিরুন</button>
+                <button class="btn btn-sm btn-secondary" type="button" onclick="officerSignOut()" data-i18n="officer.signOut">বের হোন</button>
+              </div>
+            </div>
+            <div id="officerQueue" class="queue-list"></div>
+          </div>
+
+          <div class="card">
+            <div class="card-header">
+              <h3 data-i18n="officer.obsTitle">মাঠ পর্যবেক্ষণ: কৃষকের জমির বিবরণ</h3>
+              <span class="badge badge-success" data-i18n="officer.obsBadge">কর্মকর্তার তথ্য অগ্রাধিকার পায়</span>
+            </div>
+            <form id="observationForm" class="obs-form" onsubmit="submitObservation(event)">
+              <div class="form-group">
+                <label for="obsFarmer" data-i18n="officer.obsFarmer">কৃষক</label>
+                <select id="obsFarmer" class="form-control" onchange="prefillObservation(this.value)"></select>
+              </div>
+              <div class="form-group">
+                <label for="obsLand" data-i18n="officer.obsLand">জমির ধরন</label>
+                <select id="obsLand" class="form-control">
+                  <option value="high" data-i18n="land.high">উঁচু জমি</option>
+                  <option value="medium_high" data-i18n="land.medium_high">মাঝারি উঁচু জমি</option>
+                  <option value="medium_low" data-i18n="land.medium_low">মাঝারি নিচু জমি</option>
+                  <option value="low" data-i18n="land.low">নিচু জমি</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="obsAman" data-i18n="officer.obsAman">জমিতে থাকা আমন জাত</label>
+                <select id="obsAman" class="form-control">
+                  <option value="BRRI dhan71" data-i18n="aman.dhan71">ব্রি ধান৭১ (১১৪–১১৭ দিন, খরা সহনশীল)</option>
+                  <option value="BRRI dhan87" data-i18n="aman.dhan87">ব্রি ধান৮৭ (১২৫–১২৮ দিন)</option>
+                  <option value="BRRI dhan103" data-i18n="aman.dhan103">ব্রি ধান১০৩ (১২৮–১৩৩ দিন)</option>
+                  <option value="BRRI dhan49" data-i18n="aman.dhan49">ব্রি ধান৪৯ (১৩৫ দিন, প্রচলিত)</option>
+                  <option value="BRRI dhan75" data-i18n="aman.dhan75">ব্রি ধান৭৫ (১১০–১১৫ দিন, দেরিতে রোপণ)</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="obsIrrigation" data-i18n="officer.obsIrrigation">সেচের উৎস</label>
+                <select id="obsIrrigation" class="form-control">
+                  <option value="rainfed" data-i18n="irrigation.rainfed">বৃষ্টিনির্ভর</option>
+                  <option value="shallow_tube_well" data-i18n="irrigation.shallow_tube_well">অগভীর নলকূপ</option>
+                  <option value="deep_tube_well" data-i18n="irrigation.deep_tube_well">গভীর নলকূপ</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="obsPest" data-i18n="officer.obsPest">মাঠে বালাই</label>
+                <select id="obsPest" class="form-control">
+                  <option value="none" data-i18n="pest.none">দেখা যায়নি</option>
+                  <option value="stem_borer" data-i18n="pest.stem_borer">মাজরা পোকা</option>
+                  <option value="bph" data-i18n="pest.bph">বাদামি গাছফড়িং</option>
+                  <option value="aphid" data-i18n="pest.aphid">জাব পোকা</option>
+                  <option value="blast" data-i18n="pest.blast">ব্লাস্ট রোগ</option>
+                  <option value="other" data-i18n="pest.other">অন্যান্য বালাই</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="obsSeverity" data-i18n="officer.obsSeverity">মাত্রা</label>
+                <select id="obsSeverity" class="form-control">
+                  <option value="low" data-i18n="severity.low">কম</option>
+                  <option value="medium" data-i18n="severity.medium">মাঝারি</option>
+                  <option value="high" data-i18n="severity.high">বেশি</option>
+                </select>
+              </div>
+              <div class="obs-priorities">
+                <label><strong data-i18n="officer.obsPriorities">কৃষকের অগ্রাধিকার (সাক্ষাৎকার থেকে)</strong></label>
+                <div class="slider-group"><div class="slider-header"><span data-i18n="planner.wWater">💧 পানির সাশ্রয় ও সেচ নিরাপত্তা</span><span id="valObsWater" class="slider-val">৫০%</span></div><input type="range" id="obsWater" min="0" max="100" value="50" oninput="updateObsWeights()"></div>
+                <div class="slider-group"><div class="slider-header"><span data-i18n="planner.wIncome">💰 নিট মুনাফা ও অর্থনৈতিক স্থায়িত্ব</span><span id="valObsIncome" class="slider-val">২০%</span></div><input type="range" id="obsIncome" min="0" max="100" value="20" oninput="updateObsWeights()"></div>
+                <div class="slider-group"><div class="slider-header"><span data-i18n="planner.wSoil">🌱 মাটির পুষ্টি ও জৈব পদার্থ</span><span id="valObsSoil" class="slider-val">২০%</span></div><input type="range" id="obsSoil" min="0" max="100" value="20" oninput="updateObsWeights()"></div>
+                <div class="slider-group"><div class="slider-header"><span data-i18n="planner.wPest">🐛 কম কীটনাশক (বালাই চাপ কম)</span><span id="valObsPest" class="slider-val">১০%</span></div><input type="range" id="obsPestPriority" min="0" max="100" value="10" oninput="updateObsWeights()"></div>
+              </div>
+              <div class="form-group obs-note">
+                <label for="obsNote" data-i18n="officer.obsNote">কর্মকর্তার নোট (কৃষকের কাছে যাবে)</label>
+                <textarea id="obsNote" class="form-control" rows="2" maxlength="300"></textarea>
+              </div>
+              <label class="obs-check"><input type="checkbox" id="obsResolve" checked> <span data-i18n="officer.obsResolve">এই কৃষকের কল-ব্যাক অনুরোধ শেষ হয়েছে</span></label>
+              <button class="btn btn-primary btn-block" type="submit" data-i18n="officer.obsSubmit">পর্যবেক্ষণ সংরক্ষণ ও পরামর্শ হালনাগাদ</button>
+            </form>
+            <div id="observationResult" class="obs-result" hidden></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <h3 data-i18n="officer.registerTitle">কৃষক তালিকা (নমুনা)</h3>
+            <span class="badge badge-warning" data-i18n="overview.sampleBadge">নমুনা সারি: কৃষক সাক্ষাৎকার বাকি</span>
+          </div>
+          <div class="table-responsive">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th data-i18n="officer.col.farmer">কৃষক</th>
+                  <th data-i18n="officer.col.field">জমি ও আমন জাত</th>
+                  <th data-i18n="officer.col.advice">পরামর্শ (শীর্ষ চক্র)</th>
+                  <th data-i18n="officer.col.season">এ মৌসুম</th>
+                  <th data-i18n="officer.col.status">অবস্থা</th>
+                </tr>
+              </thead>
+              <tbody id="officerFarmers"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <h3 data-i18n="officer.knowledgeTitle">কর্মকর্তার তথ্যভান্ডার</h3>
+            <span class="badge badge-primary" data-i18n="officer.knowledgeBadge">কৃষকের অ্যাপে নেই</span>
+          </div>
+          <div id="officerKnowledge" class="knowledge-grid"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ==================================================================== -->
+    <!-- SCREEN 7: FARMER HOME & ADVISORY PORTAL (5 TABS)                     -->
+    <!-- ==================================================================== -->
+    <section id="screen-farmer" class="screen-section">
+      <div class="farmer-portal-container">
+        <!-- 5-Section Header Navigation Tabs -->
+        <div class="farmer-nav-strip">
+          <button class="farmer-nav-btn active" id="f-tab-today" type="button" onclick="switchFarmerTab('today')">
+            <span class="material-symbols-outlined">calendar_today</span>
+            <span data-i18n="farmer.todayTab">আজ (Today)</span>
+          </button>
+          <button class="farmer-nav-btn" id="f-tab-weather" type="button" onclick="switchFarmerTab('weather')">
+            <span class="material-symbols-outlined">wb_sunny</span>
+            <span data-i18n="farmer.weatherTab">আবহাওয়া (Weather)</span>
+          </button>
+          <button class="farmer-nav-btn" id="f-tab-erosion" type="button" onclick="switchFarmerTab('erosion')">
+            <span class="material-symbols-outlined">waves</span>
+            <span data-i18n="farmer.erosionTab">নদীভাঙন (River Erosion)</span>
+          </button>
+          <button class="farmer-nav-btn" id="f-tab-ai" type="button" onclick="switchFarmerTab('ai')">
+            <span class="material-symbols-outlined">psychology</span>
+            <span data-i18n="farmer.aiTab">সহায়ক AI (AI Assistant)</span>
+          </button>
+          <button class="farmer-nav-btn" id="f-tab-farm" type="button" onclick="switchFarmerTab('farm')">
+            <span class="material-symbols-outlined">agriculture</span>
+            <span data-i18n="farmer.farmTab">খামার (My Farm)</span>
+          </button>
+        </div>
+
+        <!-- TAB 1: আজ (Today) -->
+        <div class="farmer-panel active" id="f-panel-today">
+          <div class="card" style="border-top: 5px solid var(--primary-light);">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 8px;">
+              <span class="badge badge-primary" data-i18n="farmer.highPriority">আজকের মূল পরামর্শ • High Priority</span>
+              <span class="badge badge-success" data-i18n="farmer.verifiedSaao">কর্মকর্তা কর্তৃক যাচাইকৃত ✓ (Verified by SAAO)</span>
+            </div>
+            <h2 style="font-family: var(--font-serif); font-size: 22px; color: var(--primary); margin-bottom: 8px;">
+              বোরো ধানের চারা রোপণ ও সেচ ব্যবস্থাপনা
+            </h2>
+            <div style="background: var(--surface-container-low); padding: 14px; border-radius: var(--radius-sm); margin-bottom: 16px; border-left: 4px solid var(--water);">
+              <p style="font-size: 15px; color: var(--on-surface); line-height: 1.6;">
+                আগামী <strong style="color: var(--primary);">৪৮ ঘণ্টায় বৃষ্টিপাতের সম্ভাবনা নেই</strong>। জমিতে <strong style="color: var(--primary);">২-৩ ইঞ্চি পানি ধরে রাখুন</strong>। ইউরিয়া সারের দ্বিতীয় কিস্তি প্রয়োগের উপযুক্ত সময় এখনই।
+              </p>
+            </div>
+
+            <!-- Audio Voice Player Component -->
+            <div class="audio-card">
+              <div style="display: flex; justify-content: space-between; align-items: center;">
+                <span style="font-size: 12.5px; font-weight: 600; color: var(--primary);">বাংলা ভয়েস পরামর্শ (Bangla TTS Audio)</span>
+                <span style="font-size: 11px; color: var(--on-surface-variant);" id="audioTimeLabel">০:০০ / ০:২৮</span>
+              </div>
+              <div class="audio-controls">
+                <button class="audio-play-btn" id="farmerAudioBtn" type="button" onclick="toggleFarmerAudio()" data-i18n-title="farmer.listenAudio" title="পরামর্শ শুনুন">
+                  <span class="material-symbols-outlined" id="farmerAudioIcon">play_arrow</span>
+                </button>
+                <div class="audio-track-bar">
+                  <div class="audio-progress" id="audioProgressBar"></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Emergency Actions & Helpline -->
+            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; margin-top: 14px;">
+              <button class="btn btn-primary" type="button" onclick="requestSaaoCallback()" data-i18n="farmer.callSaao">
+                <span class="material-symbols-outlined">support_agent</span>
+                📞 কৃষি কর্মকর্তা (SAAO)-কে কল-ব্যাক অনুরোধ
+              </button>
+              <div style="display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--primary); font-weight: 600;">
+                <span class="material-symbols-outlined" style="font-size: 18px;">phone</span>
+                <span data-i18n="farmer.emergencyHelpline">কৃষি কল সেন্টার: ১৬১২৩ (টোল-ফ্রি)</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- TAB 2: আবহাওয়া (Weather) -->
+        <div class="farmer-panel" id="f-panel-weather">
+          <div class="card">
+            <div class="card-header">
+              <h3 class="card-title" data-i18n="farmer.weatherForecast">
+                <span class="material-symbols-outlined card-title-icon">wb_sunny</span>
+                ৭-দিনের নাসা কৃষি-আবহাওয়া ও আর্দ্রতা পূর্বাভাস
+              </h3>
+              <span class="badge badge-info">NASA POWER + SMAP</span>
+            </div>
+            <div class="kpi-row" id="weatherMetricsRow">
+              <div class="kpi-card c-secondary">
+                <div class="kpi-card-icon"><span class="material-symbols-outlined">thermostat</span></div>
+                <div><div class="kpi-val" id="fwTemp">২৯.৫° সে</div><div class="kpi-label">সর্বোচ্চ তাপমাত্রা</div></div>
+              </div>
+              <div class="kpi-card c-tertiary">
+                <div class="kpi-card-icon"><span class="material-symbols-outlined">water_drop</span></div>
+                <div><div class="kpi-val" id="fwMoisture">৬২%</div><div class="kpi-label">মাটির আর্দ্রতা (শিকড় স্তর)</div></div>
+              </div>
+              <div class="kpi-card c-primary">
+                <div class="kpi-card-icon"><span class="material-symbols-outlined">rainy</span></div>
+                <div><div class="kpi-val" id="fwRain">০.০ মিমি</div><div class="kpi-label">বৃষ্টির সম্ভাবনা (৪৮ ঘণ্টা)</div></div>
+              </div>
+            </div>
+            <div id="weatherForecastList" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-top: 14px;"></div>
+          </div>
+        </div>
+
+        <!-- TAB 3: নদীভাঙন (River Erosion) -->
+        <div class="farmer-panel" id="f-panel-erosion">
+          <div class="card">
+            <div class="card-header">
+              <h3 class="card-title" data-i18n="farmer.erosionLive">
+                <span class="material-symbols-outlined card-title-icon">waves</span>
+                লাইভ নদী অববাহিকা ও ভাঙন পর্যবেক্ষণ (BWDB &amp; CEGIS)
+              </h3>
+              <select id="erosionRiverSelect" class="form-control" style="max-width: 180px;" onchange="fetchRiverErosion(this.value)">
+                <option value="jamuna">যমুনা নদী</option>
+                <option value="padma">পদ্মা নদী</option>
+                <option value="meghna">মেঘনা নদী</option>
+                <option value="teesta">তিস্তা নদী</option>
+              </select>
+            </div>
+            <div id="erosionStationList" style="display: flex; flex-direction: column; gap: 10px; margin-top: 12px;"></div>
+          </div>
+        </div>
+
+        <!-- TAB 4: সহায়ক AI (AI Assistant) -->
+        <div class="farmer-panel" id="f-panel-ai">
+          <div class="card" style="padding: 0; overflow: hidden;">
+            <div class="modal-header">
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <span class="material-symbols-outlined" style="color: var(--primary);">psychology</span>
+                <h3 style="font-size: 16px;" data-i18n="farmer.aiTitle">মাঠের কথা বাংলা কৃষি AI সহকারী</h3>
+              </div>
+              <span class="badge badge-success">যাচাইকৃত তথ্যভান্ডার</span>
+            </div>
+            <div class="chat-window">
+              <div class="chat-messages" id="farmerAiMessages">
+                <div class="chat-bubble assistant">
+                  আসসালামু আলাইকুম! আমি মাঠের কথা এআই সহকারী। বরেন্দ্র ও চর অঞ্চলের ফসল চক্র, সার প্রয়োগ, সেচ ও বালাই ব্যবস্থাপনা নিয়ে যেকোনো প্রশ্ন করতে পারেন।
+                </div>
+              </div>
+              <div class="chat-quick-prompts">
+                <button class="quick-prompt-chip" type="button" onclick="sendAiPrompt('আমার জমিতে সেচ কখন দেওয়া উচিত?')" data-i18n="farmer.aiPrompt1">
+                  সেচ কখন দেব?
+                </button>
+                <button class="quick-prompt-chip" type="button" onclick="sendAiPrompt('ব্লাস্ট রোগ প্রতিরোধে কি করব?')" data-i18n="farmer.aiPrompt2">
+                  ব্লাস্ট রোগ প্রতিরোধ
+                </button>
+                <button class="quick-prompt-chip" type="button" onclick="sendAiPrompt('বরেন্দ্র অঞ্চলের খরা সহনশীল ফসল কোনটি?')" data-i18n="farmer.aiPrompt3">
+                  বরেন্দ্র উপযোগী ফসল
+                </button>
+              </div>
+              <form class="chat-input-bar" onsubmit="handleAiChatSubmit(event)">
+                <input type="text" class="chat-input" id="farmerAiInput" placeholder="আপনার কৃষি প্রশ্ন বাংলায় লিখুন..." autocomplete="off">
+                <button class="btn btn-primary" type="submit" data-i18n="farmer.aiSend">
+                  <span class="material-symbols-outlined">send</span>
+                </button>
+              </form>
+            </div>
+          </div>
+        </div>
+
+        <!-- TAB 5: খামার (My Farm) -->
+        <div class="farmer-panel" id="f-panel-farm">
+          <div class="card">
+            <div class="card-header">
+              <h3 class="card-title" data-i18n="farmer.myFarmTitle">
+                <span class="material-symbols-outlined card-title-icon">agriculture</span>
+                আমার খামার ও জমির বিবরণ
+              </h3>
+              <button class="btn btn-outline btn-sm" id="btnEditFarm" type="button" onclick="toggleEditFarm()" data-i18n="farmer.editFarmBtn">
+                <span class="material-symbols-outlined" style="font-size: 15px;">edit</span>
+                সম্পাদনা
+              </button>
+            </div>
+            <div class="dossier-card">
+              <div class="dossier-row">
+                <div><span class="dossier-k">কৃষকের নাম:</span><p class="dossier-v" id="mfName">মোঃ রফিকুল ইসলাম</p></div>
+                <div><span class="dossier-k">মোবাইল নম্বর:</span><p class="dossier-v" id="mfPhone">০১৭১১-০০২২৩৩</p></div>
+              </div>
+              <div class="dossier-row">
+                <div><span class="dossier-k">গ্রাম ও ইউনিয়ন:</span><p class="dossier-v" id="mfVillage">চর মোহনপুর, উল্লাপাড়া, সিরাজগঞ্জ</p></div>
+                <div><span class="dossier-k">জমির আয়তন:</span><p class="dossier-v" id="mfArea">২.৫ বিঘা</p></div>
+              </div>
+              <div class="dossier-row">
+                <div><span class="dossier-k">মাটির শ্রেণি:</span><p class="dossier-v" id="mfSoil">পলি দোআঁশ (Silty Loam)</p></div>
+                <div><span class="dossier-k">বর্তমান আমন জাত:</span><p class="dossier-v" id="mfAman">ব্রি ধান-৪৯</p></div>
+              </div>
+              <div class="dossier-row">
+                <div><span class="dossier-k">প্রধান সেচ উৎস:</span><p class="dossier-v" id="mfIrrig">গভীর নলকূপ (DTW)</p></div>
+                <div><span class="dossier-k">গবাদিপশু:</span><p class="dossier-v" id="mfCattle">৩টি দেশি গরু ও ২টি ছাগল</p></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Original Farmer Profile & Keypad Reference (Preserved) -->
+        <div class="card" style="margin-top: 20px;">
+          <div class="card-header">
+            <h3 data-i18n="keypad.title">সাধারণ বাটন ফোনের কিপ্যাড ইন্টারঅ্যাকশন (IVR DTMF Mapping)</h3>
+            <span class="badge badge-primary" data-i18n="keypad.badge">স্মার্টফোন প্রয়োজন নেই</span>
+          </div>
+          <p data-i18n="keypad.intro">কৃষক যখন 'EDEN' টোল-ফ্রি নম্বরে কল দেন বা স্বয়ংক্রিয় ফোন পান, তখন তিনি কিপ্যাডের বোতাম চেপে নিজের পছন্দ জানান:</p>
+          <div class="keypad-mapping-list" style="margin-top: 12px;">
+            <div class="keypad-item"><span class="keypad-btn" data-num="1">১</span><div class="keypad-text"><strong data-i18n="keypad.k1">পানির নিরাপত্তা ও সেচ খরচ সাশ্রয়</strong><span data-i18n="keypad.k1say">"পানির চিন্তা কমাতে ১ চাপুন"</span></div></div>
+            <div class="keypad-item"><span class="keypad-btn" data-num="2">২</span><div class="keypad-text"><strong data-i18n="keypad.k2">সর্বোচ্চ ফলন ও নিট আয় বৃদ্ধি</strong><span data-i18n="keypad.k2say">"বেশি আয়ের জন্য ২ চাপুন"</span></div></div>
+            <div class="keypad-item"><span class="keypad-btn" data-num="3">৩</span><div class="keypad-text"><strong data-i18n="keypad.k3">মাটির স্বাস্থ্য ও উর্বরতা রক্ষা</strong><span data-i18n="keypad.k3say">"মাটি ভালো রাখতে ৩ চাপুন"</span></div></div>
+            <div class="keypad-item"><span class="keypad-btn" data-num="4">৪</span><div class="keypad-text"><strong data-i18n="keypad.k4">কম কীটনাশক, কম বালাই চাপ</strong><span data-i18n="keypad.k4say">"কম কীটনাশকের জন্য ৪ চাপুন"</span></div></div>
+            <div class="keypad-item"><span class="keypad-btn" data-num="9">৯</span><div class="keypad-text"><strong data-i18n="keypad.k9">কৃষি কর্মকর্তার (SAAO) কাছে কল-ব্যাক অনুরোধ</strong><span data-i18n="keypad.k9say">"কর্মকর্তার সাথে কথা বলতে ৯ চাপুন"</span></div></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ==================================================================== -->
+    <!-- SCREEN 8: ADVICE PREVIEW AND CALL DELIVERY                           -->
+    <!-- ==================================================================== -->
+    <section id="screen-delivery" class="screen-section">
+      <div class="delivery-layout">
+        <div class="card speech-preview-card">
+          <div class="card-header">
+            <h2 data-i18n="delivery.speechTitle">স্বয়ংক্রিয় বাংলা ভয়েস কল প্রিভিউ (Dual-Gate Checked)</h2>
+            <span class="badge badge-success" id="engineBadge">Template Engine</span>
+          </div>
+          <div class="speech-box">
+            <div class="audio-wave">
+              <span class="wave-bar"></span><span class="wave-bar"></span><span class="wave-bar"></span><span class="wave-bar"></span>
+            </div>
+            <p id="speechBanglaText" class="speech-text">…</p>
+          </div>
+          <div class="audio-player-controls">
+            <button class="btn btn-primary" id="btnPlaySpeech" onclick="playCurrentNarration()" data-i18n="delivery.listen">
+              🔊 অডিও শুনুন
+            </button>
+            <span class="duration-tag" id="speechDuration">…</span>
+          </div>
+        </div>
+
+        <div class="card keypad-sim-card">
+          <div class="card-header">
+            <h3 data-i18n="delivery.keypadTitle">কৃষকের বোতাম চাপার সিমুলেশন</h3>
+            <span class="badge badge-info" data-i18n="delivery.dtmf">DTMF ইভেন্ট</span>
+          </div>
+          <div class="keypad-buttons">
+            <button class="btn btn-outline btn-key" onclick="simulateFarmerKeypad('1')">
+              <span class="key-num" data-num="1">১</span> <span data-i18n="delivery.k1">পানি সাশ্রয়</span>
+            </button>
+            <button class="btn btn-outline btn-key" onclick="simulateFarmerKeypad('2')">
+              <span class="key-num" data-num="2">২</span> <span data-i18n="delivery.k2">বেশি আয়</span>
+            </button>
+            <button class="btn btn-outline btn-key" onclick="simulateFarmerKeypad('3')">
+              <span class="key-num" data-num="3">৩</span> <span data-i18n="delivery.k3">মাটির স্বাস্থ্য</span>
+            </button>
+            <button class="btn btn-outline btn-key" onclick="simulateFarmerKeypad('4')">
+              <span class="key-num" data-num="4">৪</span> <span data-i18n="delivery.k4">কম কীটনাশক</span>
+            </button>
+            <button class="btn btn-outline btn-key danger" onclick="simulateFarmerKeypad('9')">
+              <span class="key-num" data-num="9">৯</span> <span data-i18n="delivery.k9">SAAO কল-ব্যাক</span>
+            </button>
+          </div>
+          <div class="call-log-box">
+            <span class="log-title" data-i18n="delivery.logTitle">কল লগ ও সার্ভার প্রতিক্রিয়া:</span>
+            <div id="liveCallLog" class="log-content"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ==================================================================== -->
+    <!-- SCREEN 9: FARMER MOBILE COMPANION PREVIEW                            -->
+    <!-- ==================================================================== -->
+    <section id="screen-companion" class="screen-section">
+      <div class="companion-wrapper">
+        <div class="companion-intro card">
+          <h2 data-i18n="companion.title">ঐচ্ছিক কৃষক স্মার্টফোন সাথী (Companion App)</h2>
+          <p data-i18n="companion.intro">এটি কৃষকের জন্য বাধ্যতামূলক নয়; যাদের স্মার্টফোন আছে তারা অফলাইনেও সর্বশেষ অনুমোদিত পরামর্শ ও পরবর্তী করণীয় দেখতে পারেন। অ্যান্ড্রয়েড অ্যাপ এই সার্ভারের একই পরামর্শ দেখায়।</p>
+          <div class="offline-badge">
+            <span class="status-dot"></span> <span data-i18n="companion.offline">সর্বশেষ সিঙ্কের ক্যাশ থেকে অফলাইনে চলে</span>
+          </div>
+        </div>
+
+        <div class="mobile-frame-container">
+          <div class="smartphone-frame">
+            <div class="phone-screen">
+              <div class="phone-header">
+                <div class="phone-topbar">
+                  <span>EDEN</span>
+                  <span data-i18n="companion.ready">📶 অফলাইন রেডি</span>
+                </div>
+                <div class="farmer-greeting">
+                  <h3 data-i18n="companion.greeting">আসসালামু আলাইকুম (নমুনা কৃষক)</h3>
+                  <span data-i18n="companion.place">তালন্দ ইউনিয়ন • আমন ২০২৬</span>
+                </div>
+              </div>
+              <div class="phone-body">
+                <div class="phone-card action-card">
+                  <span class="card-tag" data-i18n="companion.next">আপনার পরবর্তী কাজ</span>
+                  <h4 id="compAction">…</h4>
+                  <p id="compActionText"></p>
+                  <button class="phone-btn primary" onclick="switchScreen('screen-delivery')" data-i18n="companion.listen">
+                    🔊 পরামর্শটি শুনুন (Play)
+                  </button>
+                </div>
+                <div class="phone-card">
+                  <span class="card-tag" id="compRotation">…</span>
+                  <div class="phone-metrics-row">
+                    <div class="metric-cell">
+                      <span class="val" id="compWater">…</span>
+                      <span class="lbl" data-i18n="companion.water">রবিতে সেচ</span>
+                    </div>
+                    <div class="metric-cell">
+                      <span class="val" id="compHeat">…</span>
+                      <span class="lbl" data-i18n="companion.heat">অতিরিক্ত গরমের দিন</span>
+                    </div>
+                    <div class="metric-cell">
+                      <span class="val" id="compUrea">…</span>
+                      <span class="lbl" data-i18n="companion.urea">ইউরিয়া/হেক্টর</span>
+                    </div>
+                  </div>
+                </div>
+                <div class="phone-card">
+                  <span class="card-tag" data-i18n="companion.contact">মাঠ কর্মকর্তার সাথে যোগাযোগ</span>
+                  <p data-i18n="companion.contactText">কোনো দ্বিধা বা প্রশ্ন থাকলে আপনার ব্লকের কর্মকর্তার সাথে কথা বলুন:</p>
+                  <button class="phone-btn secondary" onclick="simulateFarmerKeypad('9'); switchScreen('screen-delivery')" data-i18n="companion.call">
+                    📞 কৃষি কর্মকর্তা (SAAO)-কে কল-ব্যাক অনুরোধ
+                  </button>
+                </div>
+                <div class="phone-footer">
+                  <span id="compFooter">…</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ==================================================================== -->
+    <!-- SCREEN 10: DATA QUALITY AND COVERAGE                                 -->
+    <!-- ==================================================================== -->
+    <section id="screen-quality" class="screen-section">
+      <div class="card">
+        <h2 data-i18n="quality.title">ডেটা মান, ফ্রেশনেস ও কভারেজ নীতিমালা</h2>
+        <p class="lead-paragraph" data-i18n="quality.subtitle">
+          কোনো তথ্য অনুপলব্ধ বা অনিশ্চিত হলে তা স্পষ্ট জানানো হয়। অনুপস্থিত ডেটাকে কখনো শূন্য ধরা হয় না।
+        </p>
+        <div class="table-responsive">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th data-i18n="quality.col.source">উপাত্তের উৎস ও প্যারামিটার</th>
+                <th data-i18n="quality.col.period">সময়কাল ও রেজোলিউশন</th>
+                <th data-i18n="quality.col.freshness">ফ্রেশনেস / ল্যাটেন্সি</th>
+                <th data-i18n="quality.col.ground">গ্রাউন্ড ক্যালিব্রেশন</th>
+                <th data-i18n="quality.col.status">স্ট্যাটাস</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>NASA IMERG (বৃষ্টিপাত)</td>
+                <td>২০০০–২০২৪ (২৫ মৌসুম), ০.১°</td>
+                <td>৪ ঘণ্টা (Late Run)</td>
+                <td>বিএমডি শাহ মখদুম স্টেশন</td>
+                <td><span class="badge badge-success">সক্রিয়</span></td>
+              </tr>
+              <tr>
+                <td>NASA SMAP L4 (শিকড় আর্দ্রতা)</td>
+                <td>২০১৫–২০২৪ (১০ মৌসুম), ৯ কিমি</td>
+                <td>দৈনিক আপডেট</td>
+                <td>এসআরডিআই বরেন্দ্র সয়েল টেস্ট</td>
+                <td><span class="badge badge-success">সক্রিয়</span></td>
+              </tr>
+              <tr>
+                <td>NASA POWER (তাপমাত্রা ও বাষ্পীভবন)</td>
+                <td>১৯৮৪–বর্তমান, ০.৫°</td>
+                <td>দৈনিক (বিএমডি স্কেলড)</td>
+                <td>রাজশাহী গ্রাউন্ড থার্মোমিটার</td>
+                <td><span class="badge badge-success">সক্রিয়</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ====================================================================== -->
+  <!-- MOBILE BOTTOM NAVIGATION (< 768px)                                     -->
+  <!-- ====================================================================== -->
+  <nav class="mobile-bottom-nav">
+    <button class="mobile-nav-item active" id="mob-nav-overview" onclick="switchScreen('screen-overview')">
+      <span class="material-symbols-outlined">dashboard</span>
+      <span data-i18n="nav.mob.dash">ড্যাশবোর্ড</span>
+    </button>
+    <button class="mobile-nav-item" id="mob-nav-planner" onclick="switchScreen('screen-planner')">
+      <span class="material-symbols-outlined">published_with_changes</span>
+      <span data-i18n="nav.mob.planner">পরিকল্পনা</span>
+    </button>
+    <button class="mobile-nav-item" id="mob-nav-farmer" onclick="switchScreen('screen-farmer')">
+      <span class="material-symbols-outlined">agriculture</span>
+      <span data-i18n="nav.mob.farmer">কৃষক পোর্টাল</span>
+    </button>
+    <button class="mobile-nav-item" id="mob-nav-officer" onclick="switchScreen('screen-officer')">
+      <span class="material-symbols-outlined">shield_person</span>
+      <span data-i18n="nav.mob.officer">কর্মকর্তা</span>
+    </button>
+    <button class="mobile-nav-item" id="mob-nav-ai" onclick="switchScreen('screen-farmer'); switchFarmerTab('ai');">
+      <span class="material-symbols-outlined">psychology</span>
+      <span data-i18n="nav.mob.ai">এআই সহকারী</span>
+    </button>
+  </nav>
+
+  <!-- ====================================================================== -->
+  <!-- MODAL: ROLE-BASED SIGN-IN & OTP (FROM STITCH & MOBILE LOGINDIALOG)    -->
+  <!-- ====================================================================== -->
+  <div class="modal-backdrop hidden" id="modal-signin">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span class="material-symbols-outlined" style="color: var(--primary);">account_circle</span>
+          <h3 style="font-size: 16.5px;" data-i18n="modal.loginTitle">ভূমিকা নির্বাচন ও সাইন-ইন</h3>
+        </div>
+        <button class="close-btn" type="button" onclick="closeRoleModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <!-- Role Tabs: Farmer vs Officer -->
+        <div style="display: flex; background: var(--surface-container); padding: 4px; border-radius: var(--radius-sm); margin-bottom: 16px;">
+          <button class="btn btn-primary" id="loginTabFarmer" style="flex: 1;" type="button" onclick="setLoginRole('farmer')" data-i18n="modal.farmerTab">
+            কৃষক লগইন
+          </button>
+          <button class="btn btn-outline" id="loginTabOfficer" style="flex: 1;" type="button" onclick="setLoginRole('officer')" data-i18n="modal.officerTab">
+            কর্মকর্তা (SAAO)
+          </button>
+        </div>
+
+        <!-- Farmer Login View -->
+        <div id="loginViewFarmer">
+          <div style="background: var(--surface-container-low); padding: 10px 12px; border-radius: var(--radius-sm); display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;">
+            <div style="font-size: 12px;">
+              <strong>ডেমো কৃষক অ্যাকাউন্ট:</strong> 01711-002233
+            </div>
+            <button class="btn btn-outline btn-sm" type="button" onclick="fillFarmerDemo()" data-i18n="modal.demoAuto">স্বয়ংক্রিয় পূরণ</button>
+          </div>
+          <form onsubmit="handleFarmerLoginSubmit(event)" style="display: flex; flex-direction: column; gap: 12px;">
+            <div class="form-group" style="margin-bottom: 0;">
+              <label for="farmerPhoneInput" data-i18n="modal.mobileNum">মোবাইল নম্বর</label>
+              <input type="tel" id="farmerPhoneInput" class="form-control" placeholder="০১৭১১-০০২২৩৩" required>
+            </div>
+            <div class="form-group" style="margin-bottom: 0;">
+              <label for="farmerNidInput" data-i18n="modal.nidCard">কৃষক আইডি / NID বা কৃষি কার্ড</label>
+              <input type="text" id="farmerNidInput" class="form-control" placeholder="৮৮৯২-৩৪১২-৮৯">
+            </div>
+            <div class="form-group" style="margin-bottom: 0;">
+              <label for="farmerUnionSelect" data-i18n="modal.unionSelect">ইউনিয়ন / ব্লক</label>
+              <select id="farmerUnionSelect" class="form-control">
+                <option value="talanda_tanore">তালন্দ ইউনিয়ন, তানোর, রাজশাহী</option>
+                <option value="mohanpur">মোহনপুর ইউনিয়ন, উল্লাপাড়া, সিরাজগঞ্জ</option>
+                <option value="panchakroshi">পঞ্চক্রোশী ইউনিয়ন, উল্লাপাড়া, সিরাজগঞ্জ</option>
+              </select>
+            </div>
+            <button class="btn btn-primary btn-block" type="submit" data-i18n="modal.sendOtp" style="margin-top: 6px;">
+              ওটিপি পাঠান / Send OTP
+            </button>
+          </form>
+        </div>
+
+        <!-- Officer Login View -->
+        <div id="loginViewOfficer" style="display: none;">
+          <div style="background: var(--surface-container-low); padding: 10px 12px; border-radius: var(--radius-sm); display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;">
+            <div style="font-size: 12px;">
+              <strong>অফিসার ডেমো:</strong> SAAO-Talanda / talanda-demo
+            </div>
+            <button class="btn btn-outline btn-sm" type="button" onclick="fillOfficerDemo()" data-i18n="modal.demoAuto">স্বয়ংক্রিয় পূরণ</button>
+          </div>
+          <form onsubmit="handleOfficerLoginSubmit(event)" style="display: flex; flex-direction: column; gap: 12px;">
+            <div class="form-group" style="margin-bottom: 0;">
+              <label for="officerIdInput" data-i18n="modal.cadreId">ডিএই কর্মকর্তা আইডি</label>
+              <input type="text" id="officerIdInput" class="form-control" placeholder="saao_talanda_01" required>
+            </div>
+            <div class="form-group" style="margin-bottom: 0;">
+              <label for="officerPinInput" data-i18n="modal.securityPin">নিরাপত্তা পিন বা পাসওয়ার্ড</label>
+              <input type="password" id="officerPinInput" class="form-control" placeholder="talanda-demo" required>
+            </div>
+            <button class="btn btn-primary btn-block" type="submit" data-i18n="modal.signInBtn" style="margin-top: 6px;">
+              কর্মকর্তা প্রবেশ / Official Sign In
+            </button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- OTP Verification Sub-Modal -->
+  <div class="modal-backdrop hidden" id="modal-otp">
+    <div class="modal-card" style="max-width: 380px; text-align: center;">
+      <div class="modal-header">
+        <h3 style="font-size: 16px; margin: 0 auto;" data-i18n="modal.otpVerifyTitle">ওটিপি যাচাইকরণ / OTP Verification</h3>
+        <button class="close-btn" type="button" onclick="closeOtpModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <p style="font-size: 13px; color: var(--on-surface-variant); margin-bottom: 14px;" id="otpTargetText">
+          আপনার মোবাইলে ৪ সংখ্যার কোড পাঠানো হয়েছে
+        </p>
+        <div style="display: flex; justify-content: center; gap: 10px; margin-bottom: 16px;">
+          <input type="text" maxlength="1" class="form-control" style="width: 48px; height: 48px; text-align: center; font-size: 20px; font-weight: 700;" value="৪">
+          <input type="text" maxlength="1" class="form-control" style="width: 48px; height: 48px; text-align: center; font-size: 20px; font-weight: 700;" value="২">
+          <input type="text" maxlength="1" class="form-control" style="width: 48px; height: 48px; text-align: center; font-size: 20px; font-weight: 700;" value="৮">
+          <input type="text" maxlength="1" class="form-control" style="width: 48px; height: 48px; text-align: center; font-size: 20px; font-weight: 700;" value="০">
+        </div>
+        <button class="btn btn-primary btn-block" type="button" onclick="confirmOtpAndLogin()" data-i18n="modal.confirmLogin">
+          নিশ্চিত করুন / Confirm &amp; Enter
+        </button>
+        <button class="btn btn-outline btn-block" style="margin-top: 8px;" type="button" onclick="closeOtpModal()" data-i18n="modal.cancel">
+          বাতিল করুন
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ====================================================================== -->
+  <!-- MODAL: ADD CUSTOM CROP CANDIDATE                                       -->
+  <!-- ====================================================================== -->
+  <div class="modal-backdrop hidden" id="modal-add-crop">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span class="material-symbols-outlined" style="color: var(--primary);">add_circle</span>
+          <h3 style="font-size: 16.5px;" data-i18n="modal.addCropTitle">নতুন শস্য বিকল্প যোগ করুন</h3>
+        </div>
+        <button class="close-btn" type="button" onclick="closeAddCropModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <form onsubmit="handleCustomCropSubmit(event)" style="display: flex; flex-direction: column; gap: 12px;">
+          <div class="form-group" style="margin-bottom: 0;">
+            <label for="customCropName" data-i18n="modal.cropName">শস্য ও জাতের নাম</label>
+            <input type="text" id="customCropName" class="form-control" placeholder="যেমন: বারি গম-৩৩ বা বারি মসুর-৮" required>
+          </div>
+          <div class="form-group" style="margin-bottom: 0;">
+            <label for="customCropWindow" data-i18n="modal.cropWindow">মৌসুম / সময়কাল</label>
+            <input type="text" id="customCropWindow" class="form-control" placeholder="রবি (নভেম্বর - ফেব্রুয়ারি)" required>
+          </div>
+          <div class="form-group" style="margin-bottom: 0;">
+            <label for="customCropDuration" data-i18n="modal.cropDuration">জীবনকাল (দিন)</label>
+            <input type="number" id="customCropDuration" class="form-control" placeholder="১০০" required>
+          </div>
+          <div class="form-group" style="margin-bottom: 0;">
+            <label for="customCropWater" data-i18n="modal.cropWater">সেচের চাহিদা (মিমি)</label>
+            <input type="number" id="customCropWater" class="form-control" placeholder="১২০" required>
+          </div>
+          <div class="form-group" style="margin-bottom: 0;">
+            <label for="customCropProfit" data-i18n="modal.cropProfit">সম্ভাব্য লাভ (টাকা/বিঘা)</label>
+            <input type="number" id="customCropProfit" class="form-control" placeholder="৩৫০০০" required>
+          </div>
+          <button class="btn btn-primary btn-block" type="submit" data-i18n="modal.addCropSubmit" style="margin-top: 6px;">
+            + বিকল্প তালিকায় যোগ করুন
+          </button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- ====================================================================== -->
+  <!-- MODAL: 6-DIMENSION INSPECTION                                          -->
+  <!-- ====================================================================== -->
+  <div class="modal-backdrop hidden" id="modal-dimension-inspect">
+    <div class="modal-card modal-lg">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span class="material-symbols-outlined" style="color: var(--primary);">analytics</span>
+          <h3 style="font-size: 16.5px;" data-i18n="modal.dimTitle">বিস্তারিত ৬-মাত্রিক উপযোগিতা মূল্যায়ন</h3>
+        </div>
+        <button class="close-btn" type="button" onclick="closeDimensionModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <p style="font-size: 13.5px; color: var(--on-surface-variant); margin-bottom: 16px;">
+          প্রস্তাবিত ফসল চক্রের ৬টি মৌলিক কৃষি-পরিবেশগত মাত্রায় স্কোর ও নির্ভরযোগ্যতার তুলনামূলক বিবরণ:
+        </p>
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px;" id="dimensionInspectGrid">
+          <div class="card" style="margin: 0; padding: 12px; background: var(--surface-container-low);">
+            <div style="display: flex; align-items: center; gap: 6px; color: var(--water); margin-bottom: 4px;">
+              <span class="material-symbols-outlined">water_drop</span>
+              <strong style="font-size: 14px;">১. পানি সাশ্রয় (Water)</strong>
+            </div>
+            <p style="font-size: 12px; color: var(--on-surface-variant);">ভূগর্ভস্থ বরেন্দ্র অ্যাকুইফার সংরক্ষণ। ব্রি ধান৭১ ও রবি মসুর চক্রে সেচ সাশ্রয় ৪১%।</p>
+          </div>
+          <div class="card" style="margin: 0; padding: 12px; background: var(--surface-container-low);">
+            <div style="display: flex; align-items: center; gap: 6px; color: var(--warning); margin-bottom: 4px;">
+              <span class="material-symbols-outlined">thermostat</span>
+              <strong style="font-size: 14px;">২. তাপ সহনশীলতা (Heat)</strong>
+            </div>
+            <p style="font-size: 12px; color: var(--on-surface-variant);">মার্চ-এপ্রিলের তীব্র দাবদাহ এড়ানো। বোরোর তুলনায় তাপীয় শকের ঝুঁকি ৮৫% কম।</p>
+          </div>
+          <div class="card" style="margin: 0; padding: 12px; background: var(--surface-container-low);">
+            <div style="display: flex; align-items: center; gap: 6px; color: var(--tertiary); margin-bottom: 4px;">
+              <span class="material-symbols-outlined">flood</span>
+              <strong style="font-size: 14px;">৩. বন্যা নিরাপত্তা (Flood)</strong>
+            </div>
+            <p style="font-size: 12px; color: var(--on-surface-variant);">আমন কর্তন ২৫ অক্টোবরের মধ্যে শেষ হওয়ায় আগাম বর্ষণ বা জলাবদ্ধতার শঙ্কা মুক্ত।</p>
+          </div>
+          <div class="card" style="margin: 0; padding: 12px; background: var(--surface-container-low);">
+            <div style="display: flex; align-items: center; gap: 6px; color: var(--secondary); margin-bottom: 4px;">
+              <span class="material-symbols-outlined">compost</span>
+              <strong style="font-size: 14px;">৪. মাটির স্বাস্থ্য (Soil)</strong>
+            </div>
+            <p style="font-size: 12px; color: var(--on-surface-variant);">ডালজাতীয় ফসলের রাইজোবিয়াম ব্যাকটেরিয়া দ্বারা প্রাকৃতিক নাইট্রোজেন সংবন্ধন।</p>
+          </div>
+          <div class="card" style="margin: 0; padding: 12px; background: var(--surface-container-low);">
+            <div style="display: flex; align-items: center; gap: 6px; color: #715a3e; margin-bottom: 4px;">
+              <span class="material-symbols-outlined">grass</span>
+              <strong style="font-size: 14px;">৫. পশুখাদ্য উৎপাদন (Fodder)</strong>
+            </div>
+            <p style="font-size: 12px; color: var(--on-surface-variant);">রবি ডালের শুষ্ক খড় ও খৈল স্থানীয় গবাদিপশুর জন্য উচ্চ প্রোটিনযুক্ত খাবার সরবরাহ করে।</p>
+          </div>
+          <div class="card" style="margin: 0; padding: 12px; background: var(--surface-container-low);">
+            <div style="display: flex; align-items: center; gap: 6px; color: var(--primary); margin-bottom: 4px;">
+              <span class="material-symbols-outlined">payments</span>
+              <strong style="font-size: 14px;">৬. পারিবারিক আয় (Income)</strong>
+            </div>
+            <p style="font-size: 12px; color: var(--on-surface-variant);">কম উৎপাদন ব্যয় ও তেলের বাজারমূল্যের কারণে প্রতি বিঘায় নিট আয় ৳ ৪২,৫০০।</p>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-primary" type="button" onclick="closeDimensionModal()" data-i18n="modal.dimClose">
+          বন্ধ করুন
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ====================================================================== -->
+  <!-- MODAL: OUR STORY & NASA SPACE APPS SCIENCE                             -->
+  <!-- ====================================================================== -->
+  <div class="modal-backdrop hidden" id="modal-story">
+    <div class="modal-card modal-lg">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span class="material-symbols-outlined" style="color: var(--primary);">auto_stories</span>
+          <h3 style="font-size: 16.5px;" data-i18n="modal.storyTitle">আমাদের গল্প ও নাসা স্পেস অ্যাপস গবেষণা</h3>
+        </div>
+        <button class="close-btn" type="button" onclick="closeStoryModal()">✕</button>
+      </div>
+      <div class="modal-body" style="line-height: 1.7; font-size: 14px; color: var(--on-surface);">
+        <p style="margin-bottom: 12px;">
+          <strong>Project EDEN (Earth Data &amp; Environment Navigator) / মাঠের কথা</strong> নাসা স্পেস অ্যাপস চ্যালেঞ্জের বৈজ্ঞানিক উদ্ভাবন। এর উদ্দেশ্য বাংলাদেশের বরেন্দ্র এবং যমুনা-পদ্মা নদী অববাহিকার প্রান্তিক কৃষক ও উপসহকারী কৃষি কর্মকর্তাদের (SAAO) হাতে নাসার ২৫ বছরের ঐতিহাসিক ও রিয়েল-টাইম স্যাটেলাইট ডেটা সহজে পৌঁছে দেওয়া।
+        </p>
+        <div style="background: var(--surface-container-low); padding: 14px; border-radius: var(--radius-sm); margin-bottom: 14px;">
+          <strong style="color: var(--primary); display: block; margin-bottom: 6px;">ব্যবহৃত নাসা উপগ্রহ ও ডেটাসেট:</strong>
+          <ul style="padding-left: 20px; font-size: 13px;">
+            <li><strong>NASA IMERG:</strong> ০.১° গ্রিডে ২৫ বছরের বৃষ্টিপাত বিশ্লেষণ ও খরা মূল্যায়ন</li>
+            <li><strong>NASA SMAP L4:</strong> ৯ কিমি রেজোলিউশনে শিকড় অঞ্চলের ভূগর্ভস্থ আর্দ্রতা পর্যবেক্ষণ</li>
+            <li><strong>NASA POWER:</strong> বিএমডি গ্রাউন্ড স্টেশন দ্বারা ক্যালিব্রেট করা দৈনিক তাপমাত্রা ও সৌরবিকিরণ</li>
+            <li><strong>GRACE &amp; GLDAS:</strong> বরেন্দ্র অঞ্চলের গভীর ভূগর্ভস্থ পানির মজুত পর্যবেক্ষণ</li>
+            <li><strong>Sentinel-2 &amp; MODIS:</strong> মাঠের ফসলের ক্যানোপি স্বাস্থ্য (NDVI) এবং গ্রিননেস ট্র্যাকিং</li>
+          </ul>
+        </div>
+        <p style="margin-bottom: 12px;">
+          সকল পরামর্শ ও রোটেশন অ্যালগরিদম বাংলাদেশ ধান গবেষণা ইনস্টিটিউট (BRRI), বাংলাদেশ কৃষি গবেষণা কাউন্সিল (BARC) এবং বরেন্দ্র বহুমুখী উন্নয়ন কর্তৃপক্ষের (BMDA) মাঠ নির্দেশিকার সাথে সম্পূর্ণ সামঞ্জস্যপূর্ণ।
+        </p>
+        <div style="text-align: right; margin-top: 16px;">
+          <a class="btn btn-primary" href="https://matikohonoverview.vercel.app/" target="_blank" rel="noopener noreferrer" data-i18n="modal.storyLiveLink">
+            লাইভ স্টোরি সাইট ভিজিট করুন ↗
+          </a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ====================================================================== -->
+  <!-- TOAST NOTIFICATIONS                                                    -->
+  <!-- ====================================================================== -->
+  <div class="toast-notification" id="dispatch-toast">
+    <div style="width: 32px; height: 32px; border-radius: 50%; background: var(--secondary); display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+      <span class="material-symbols-outlined" style="color: #fff; font-size: 18px;">done_all</span>
+    </div>
+    <div>
+      <strong style="display: block; font-size: 14px;">পরামর্শ সফলভাবে প্রেরিত হয়েছে!</strong>
+      <span style="font-size: 12px; opacity: 0.9;" id="dispatchToastMsg">কৃষকের মুঠোফোনে বাংলা এসএমএস ও DAE কৃষক অ্যাপে পরামর্শ পৌঁছে গেছে।</span>
+    </div>
+  </div>
+
+  <div class="toast-notification" id="cycle-select-toast" style="background-color: var(--secondary);">
+    <div style="width: 32px; height: 32px; border-radius: 50%; background: rgba(255,255,255,0.25); display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+      <span class="material-symbols-outlined" style="color: #fff; font-size: 18px;">check</span>
+    </div>
+    <div>
+      <strong style="display: block; font-size: 14px;">ফসল চক্রটি সফলভাবে নির্বাচিত হয়েছে!</strong>
+      <span style="font-size: 12px; opacity: 0.9;" id="cycleSelectToastMsg">এই চক্রটি কৃষকের মৌসুমি পরিকল্পনায় যুক্ত করা হয়েছে।</span>
+    </div>
+  </div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

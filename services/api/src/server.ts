@@ -1,0 +1,610 @@
+import http from 'node:http';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import type { AdviceJSON, CandidateRotation } from '@project-eden/contracts';
+import type { PlanOptionsRequest } from '../../../packages/rotation-engine/src/engine.ts';
+import { RotationEngine, UnsupportedUnionError, SUPPORTED_UNIONS } from '../../../packages/rotation-engine/src/engine.ts';
+import { FeatureRegistry } from '../../../packages/rotation-engine/src/registry.ts';
+import { HAOR_FLASH_FLOOD, RELEASE, TALANDA_SRDI, TANORE_ADVISORIES, TANORE_AMAN_REPLAY, TANORE_CONDITIONS, TANORE_RABI_REPLAY, TANORE_SOIL_CARBON } from '../../../packages/rotation-engine/src/data/tanore_replay_data.ts';
+import { AMAN_CATALOG, RABI_CATALOG } from '../../../packages/rotation-engine/src/data/crop_catalog.ts';
+import { IPM_AMAN, IPM_BY_RABI, IPM_GENERAL } from '../../../packages/rotation-engine/src/data/ipm_catalog.ts';
+import { bnDate, bnDateOf, bnDigits, bnOf, enDate } from '../../../packages/rotation-engine/src/bn.ts';
+import * as desk from './officer_desk.ts';
+import { DualGateNarrationValidator } from '../../../packages/narration-core/src/dual_gate_validator.ts';
+import { TemplateNarrator } from '../../../packages/narration-core/src/template_narrator.ts';
+import { getNasaWeather } from './weather.ts';
+import { getRiverErosion } from './erosion.ts';
+import { askAiAssistant } from './ai_assistant.ts';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const PUBLIC_DIR = path.resolve(__dirname, '../../../apps/saao-dashboard/public');
+
+const featureRegistry = new FeatureRegistry();
+const rotationEngine = new RotationEngine(featureRegistry);
+const templateNarrator = new TemplateNarrator();
+const dualGateValidator = new DualGateNarrationValidator();
+
+const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 4000;
+
+const DEFAULT_PRIORITIES = { water: 0.5, income: 0.3, soil: 0.2 };
+const KEYPAD_PRIORITIES: Record<string, { label: string; labelEnglish: string; priorities: PlanOptionsRequest['farmerPriorities'] }> = {
+  '1': { label: 'পানির নিরাপত্তা', labelEnglish: 'water security', priorities: { water: 1 } },
+  '2': { label: 'সর্বোচ্চ আয়', labelEnglish: 'highest income', priorities: { income: 1 } },
+  '3': { label: 'মাটির স্বাস্থ্য', labelEnglish: 'soil health', priorities: { soil: 1 } },
+  '4': { label: 'কম কীটনাশক', labelEnglish: 'less pesticide', priorities: { pest: 1 } },
+};
+const PATTERN_BANGLA: Record<string, string> = {
+  'Boro-Fallow-T. Aman': 'বোরো – পতিত – রোপা আমন',
+};
+const BMD_STATION_BANGLA: Record<string, string> = {
+  '41895 ShahMokhdum': 'শাহ মখদুম, রাজশাহী (৪১৮৯৫)',
+};
+const RAIN_VERDICT_BANGLA: Record<string, string> = {
+  'uncertain (estimates disagree)': 'অনিশ্চিত (তিনটি অনুমান মেলেনি)',
+  dry: 'স্বাভাবিকের চেয়ে শুকনো',
+  wet: 'স্বাভাবিকের চেয়ে বেশি',
+  normal: 'স্বাভাবিক',
+};
+
+function sendJSON(res: http.ServerResponse, statusCode: number, data: any) {
+  res.writeHead(statusCode, {
+    'Content-Type': 'application/json; charset=utf-8',
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type',
+  });
+  res.end(JSON.stringify(data));
+}
+
+function parseBody(req: http.IncomingMessage): Promise<any> {
+  return new Promise((resolve, reject) => {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', () => {
+      try {
+        resolve(body ? JSON.parse(body) : {});
+      } catch (err) {
+        reject(err);
+      }
+    });
+    req.on('error', reject);
+  });
+}
+
+function planRequest(body: any): PlanOptionsRequest {
+  return {
+    unionId: body.unionId || 'talanda_tanore',
+    unionNameBangla: body.unionNameBangla || 'তালন্দ ইউনিয়ন',
+    upazila: body.upazila || 'Tanore',
+    district: body.district || 'Rajshahi',
+    landType: body.landType || 'medium_high',
+    season: body.season || '2026-aman',
+    currentAmanCrop: body.currentAmanCrop,
+    farmerPriorities: body.farmerPriorities || DEFAULT_PRIORITIES,
+  };
+}
+
+/**
+ * Engine advice plus the checked spoken script for the phone app's cached card. With a farmer ID, the Krishi
+ * officer's latest field observation takes priority over the request's land type, Aman variety and priorities.
+ */
+function adviseWithNarration(request: PlanOptionsRequest, farmerId?: string): AdviceJSON {
+  const advice = rotationEngine.generateAdvice(farmerId ? desk.planRequestForFarmer(farmerId, request) : request);
+  if (farmerId) advice.verification = desk.verificationFor(farmerId);
+  if (advice.farmer_card) {
+    const narration = templateNarrator.render(advice, advice.options[0]);
+    advice.farmer_card.audioScriptBangla = narration.banglaSpeechText;
+    advice.farmer_card.audioDurationSeconds = narration.durationSecondsEstimate;
+  }
+  return advice;
+}
+
+function overview() {
+  const advice = adviseWithNarration(planRequest({}));
+  const best = advice.options[0];
+  const bestAman = TANORE_AMAN_REPLAY[best.cropSequence[0].variety];
+  const dhan49 = TANORE_AMAN_REPLAY['BRRI dhan49'];
+  const rain = TANORE_CONDITIONS.rainLast30Days;
+  const smap = TANORE_CONDITIONS.smap;
+
+  return {
+    scope: {
+      district: 'Rajshahi (রাজশাহী)',
+      upazila: 'Tanore (তানোর)',
+      union: 'Talanda (তালন্দ)',
+      union_id: 'talanda_tanore',
+      land_type: 'medium_high',
+      lat: TANORE_CONDITIONS.lat,
+      lon: TANORE_CONDITIONS.lon,
+    },
+    data_release: {
+      version: RELEASE.id,
+      releaseDate: RELEASE.generatedOn,
+      researchCommit: RELEASE.researchCommit,
+      status: 'healthy',
+      missingInputs: advice.stale_or_missing_inputs.map(m => m.dataset),
+    },
+    season_summary: {
+      season: 'Aman 2026 (আমন ২০২৬)',
+      dominantPattern: TANORE_CONDITIONS.landUse.topPattern,
+      dominantPatternBangla: PATTERN_BANGLA[TANORE_CONDITIONS.landUse.topPattern] ?? TANORE_CONDITIONS.landUse.topPattern,
+      dominantPatternPct: TANORE_CONDITIONS.landUse.topPatternPct,
+      croppingIntensity: `${TANORE_CONDITIONS.landUse.croppingIntensityPct}%`,
+      landUseYear: TANORE_CONDITIONS.landUse.year,
+      activeFarmersInUnion: null, // no farmer interviews yet
+    },
+    local_satellite_conditions: {
+      smap: smap && {
+        date: smap.date,
+        rootZoneM3M3: smap.rootZoneM3M3,
+        sameDatePastYears: smap.sameDatePastYears,
+        nov10TypicalM3M3: smap.nov10TypicalM3M3,
+        nov10Years: smap.nov10Years,
+      },
+      rain_last_30_days: {
+        from: rain.from,
+        to: rain.to,
+        imergLateMm: rain.imergLateMm,
+        pctOfNormal: rain.pctOfNormal,
+        lateFinalRatio: rain.lateFinalRatio,
+        verdict: rain.verdict,
+        verdictBangla: RAIN_VERDICT_BANGLA[rain.verdict] ?? rain.verdict,
+      },
+    },
+    recommended: {
+      rotationBangla: best.nameBangla,
+      rotationEnglish: best.nameEnglish,
+      amanVarietyBangla: best.cropSequence[0].varietyBangla,
+      amanVariety: best.cropSequence[0].variety,
+      fieldFreeDateBangla: best.fieldFreeDateBangla,
+      fieldFreeDateEnglish: best.fieldFreeDateEnglish,
+    },
+    aman_replay: Object.values(TANORE_AMAN_REPLAY).map(r => ({
+      variety: r.variety,
+      varietyBangla: AMAN_CATALOG[r.variety]?.varietyBangla ?? r.variety,
+      noteBangla: AMAN_CATALOG[r.variety]?.noteBangla ?? '',
+      noteEnglish: AMAN_CATALOG[r.variety]?.noteEnglish ?? '',
+      rescueSeasons: r.rescueSeasons,
+      totalSeasons: r.totalSeasons,
+      floweringBangla: bnDate(r.flowering),
+      floweringEnglish: enDate(r.flowering),
+      fieldFreeBangla: bnDate(r.fieldFree),
+      fieldFreeEnglish: enDate(r.fieldFree),
+    })),
+    active_alerts: [
+      {
+        id: 'alt_late_aman_drought',
+        type: 'warning',
+        titleBangla: 'দেরিতে ফুল আসা আমনে খরার ঝুঁকি',
+        titleEnglish: 'Dry spells at flowering for late Aman',
+        textBangla: `${bnDigits(dhan49.totalSeasons)} মৌসুমের ${bnDigits(dhan49.rescueSeasons)}টিতে (${bnDigits(Math.round((100 * dhan49.rescueSeasons) / dhan49.totalSeasons))}%) ${AMAN_CATALOG['BRRI dhan49'].varietyBangla}-এ ফুল আসার সময় (~${bnDate(dhan49.flowering)}) সম্পূরক সেচ লেগেছে।`,
+        textEnglish: `In ${dhan49.rescueSeasons} of ${dhan49.totalSeasons} seasons (${Math.round((100 * dhan49.rescueSeasons) / dhan49.totalSeasons)}%) BRRI dhan49 needed rescue irrigation at flowering (~${enDate(dhan49.flowering)}).`,
+        recommendationEnglish: `${best.cropSequence[0].variety} flowers ~${enDate(bestAman.flowering)} (irrigation in ${bestAman.rescueSeasons} seasons) and frees the field by ${enDate(bestAman.fieldFree)}, before dhan49's ${enDate(dhan49.fieldFree)}.`,
+        recommendationBangla: `${best.cropSequence[0].varietyBangla} ফুল আনে ~${bnDate(bestAman.flowering)} (${bnDigits(bestAman.rescueSeasons)}টি মৌসুমে সেচ), আর জমি খালি করে ${bnDate(bestAman.fieldFree)}, ধান৪৯-এর ${bnDateOf(bnDate(dhan49.fieldFree))} আগে।`,
+      },
+    ],
+    context: {
+      soilTypeBangla: TALANDA_SRDI.soilTypeBangla,
+      soilTypeEnglish: 'Kharia soil (Barind)',
+      landTypeBangla: TALANDA_SRDI.landTypeBangla,
+      landTypeEnglish: 'medium-high land',
+      bmdStation: TANORE_CONDITIONS.bmdStation,
+      bmdStationBangla: BMD_STATION_BANGLA[TANORE_CONDITIONS.bmdStation] ?? TANORE_CONDITIONS.bmdStation,
+      bmdStationKm: TANORE_CONDITIONS.bmdStationKm,
+      groundwater: TANORE_CONDITIONS.groundwater,
+      winterGreenness: TANORE_CONDITIONS.winterGreenness,
+      rootZoneGldasMm: TANORE_CONDITIONS.rootZoneGldasMm,
+      cattlePerKm2: TANORE_CONDITIONS.cattlePerKm2,
+    },
+    early_warnings: earlyWarnings(),
+    soil_carbon: TANORE_SOIL_CARBON,
+    recent_farmer_contacts: farmerRows(),
+    pest_reports: pestReports(),
+  };
+}
+
+/** Is today inside the haor flash-flood season (15 Mar-15 May)? If not, when does the Sohra trigger re-arm? */
+function haorStatus(today = new Date()) {
+  const [m0, d0] = HAOR_FLASH_FLOOD.window[0].split('-').map(Number);
+  const [m1, d1] = HAOR_FLASH_FLOOD.window[1].split('-').map(Number);
+  const year = today.getUTCFullYear();
+  const start = Date.UTC(year, m0 - 1, d0);
+  const end = Date.UTC(year, m1 - 1, d1, 23, 59);
+  if (today.getTime() >= start && today.getTime() <= end) return { state: 'in_season', nextStart: null };
+  const next = today.getTime() < start ? start : Date.UTC(year + 1, m0 - 1, d0);
+  return { state: 'off_season', nextStart: new Date(next).toISOString().slice(0, 10) };
+}
+
+/** Early warnings beyond the rotation: the haor flash flood (Dharmapasha), warming nights, cattle heat. */
+function earlyWarnings() {
+  const trend = (measure: string) => TANORE_ADVISORIES.heatTrends.find(t => t.measure === measure)!;
+  const byVariety = (sowing: string) => HAOR_FLASH_FLOOD.escape.filter(e => e.sowing === sowing);
+  const cattle = TANORE_ADVISORIES.cattleHeat;
+  const peak = [...cattle].sort((a, b) => b.dangerShare - a.dangerShare)[0];
+  return {
+    haor: {
+      pilotBangla: 'ধর্মপাশা, সুনামগঞ্জ হাওর',
+      pilotEnglish: 'Dharmapasha, Sunamganj haor',
+      status: haorStatus(),
+      window: HAOR_FLASH_FLOOD.window,
+      watchMm: HAOR_FLASH_FLOOD.watchMm,
+      warningMm: HAOR_FLASH_FLOOD.warningMm,
+      skill: HAOR_FLASH_FLOOD.skill.filter(s => s.thresholdMm >= HAOR_FLASH_FLOOD.watchMm),
+      escapeOnCalendar: byVariety('BRRI calendar'),
+      escapeTwoWeeksEarly: byVariety('two weeks early'),
+      seasons: HAOR_FLASH_FLOOD.seasons,
+      source: HAOR_FLASH_FLOOD.source,
+    },
+    warmNights: {
+      dhan71: trend('aman71_night_c'),
+      dhan49: trend('aman49_night_c'),
+      wheat20Nov: trend('wheat_20nov_days_gt30'),
+      boroHotDays: trend('boro_days_ge35'),
+    },
+    cattleHeat: {
+      months: cattle,
+      noReliefMonths: cattle.filter(m => m.nightsWithoutReliefPct >= 99.5).map(m => m.month),
+      peakMonth: peak.month,
+      peakDangerShare: peak.dangerShare,
+      coolestHours: peak.coolestHours,
+      source: TANORE_ADVISORIES.cattleSource,
+    },
+  };
+}
+
+/** Union-level pest sightings from officers' latest field observations (farmer details stay officer-only). */
+function pestReports() {
+  const counts = new Map<string, { pest: string; bn: string; en: string; fields: number; highSeverity: number }>();
+  for (const f of desk.farmers()) {
+    const obs = desk.latestObservation(f.id);
+    if (!obs || obs.pestSeen === 'none') continue;
+    const entry = counts.get(obs.pestSeen) ?? { pest: obs.pestSeen, ...desk.PEST_NAMES[obs.pestSeen], fields: 0, highSeverity: 0 };
+    entry.fields += 1;
+    if (obs.pestSeverity === 'high') entry.highSeverity += 1;
+    counts.set(obs.pestSeen, entry);
+  }
+  return [...counts.values()];
+}
+
+/** Sample farmer rows for the overview, each with its own officer-aware top rotation. */
+function farmerRows() {
+  const openCallbacks = new Set(desk.callbacks().filter(c => c.status === 'open').map(c => c.farmerId));
+  const short = (o: CandidateRotation) => ({
+    bn: `${(o.cropSequence[0].varietyBangla ?? o.cropSequence[0].variety).replace('ব্রি ', '')} → ${o.cropSequence[1].cropBangla ?? o.cropSequence[1].crop}`,
+    en: `${o.cropSequence[0].variety.replace('BRRI ', '')} → ${o.cropSequence[1].crop}`,
+  });
+  return desk.farmers().map(f => {
+    const advice = adviseWithNarration(planRequest({}), f.id);
+    const next = short(advice.options[0]);
+    const nowOption = advice.options.find(o => o.id === advice.this_season_option_id);
+    const now = nowOption ? short(nowOption) : null;
+    const verified = Boolean(desk.latestObservation(f.id));
+    return {
+      farmerId: f.id,
+      name: f.nameBangla,
+      nameEnglish: f.nameEnglish,
+      village: f.villageBangla,
+      villageEnglish: f.villageEnglish,
+      landType: f.landType,
+      rotation: now?.bn ?? next.bn,
+      rotationEnglish: now?.en ?? next.en,
+      nextSeasonRotation: now && now.bn !== next.bn ? next.bn : null,
+      nextSeasonRotationEnglish: now && now.en !== next.en ? next.en : null,
+      status: openCallbacks.has(f.id) ? 'callback' : verified ? 'verified' : 'pending',
+      sample: f.sample,
+    };
+  });
+}
+
+/** Officer-only reference: the full SRDI card, replay details, IPM steps and data caveats. */
+function knowledgePack() {
+  const advice = adviseWithNarration(planRequest({}));
+  const rabiKeys = Object.keys(TANORE_RABI_REPLAY).filter(k => k !== 'BARI Gom 33 (Late)');
+  return {
+    srdi: {
+      soilTypeBangla: TALANDA_SRDI.soilTypeBangla,
+      landTypeBangla: TALANDA_SRDI.landTypeBangla,
+      source: TALANDA_SRDI.source,
+      rows: [
+        { cropBangla: 'আমন ধান', cropEnglish: 'Aman rice', dose: TALANDA_SRDI.aman },
+        ...rabiKeys.map(k => ({ cropBangla: RABI_CATALOG[k].cropBangla, cropEnglish: RABI_CATALOG[k].crop, dose: TANORE_RABI_REPLAY[k].fertilizer })),
+      ],
+    },
+    amanReplay: Object.values(TANORE_AMAN_REPLAY).map(r => ({
+      variety: r.variety,
+      varietyBangla: AMAN_CATALOG[r.variety]?.varietyBangla ?? r.variety,
+      rescueSeasons: r.rescueSeasons,
+      totalSeasons: r.totalSeasons,
+      rescueYears: r.rescueYears,
+      floweringEnglish: enDate(r.flowering),
+      floweringBangla: bnDate(r.flowering),
+      fieldFreeEnglish: enDate(r.fieldFree),
+      fieldFreeBangla: bnDate(r.fieldFree),
+      cropWaterUseMm: r.cropWaterUseMm,
+    })),
+    rabiReplay: Object.entries(TANORE_RABI_REPLAY).map(([key, r]) => ({
+      key,
+      cropBangla: RABI_CATALOG[key].cropBangla,
+      cropEnglish: RABI_CATALOG[key].crop,
+      sowingEnglish: enDate(r.sowing),
+      sowingBangla: bnDate(r.sowing),
+      windowEnglish: r.sowingWindow ? `${enDate(r.sowingWindow[0])}-${enDate(r.sowingWindow[1])}` : null,
+      windowSource: r.sowingWindowSource,
+      netIrrigationMm: r.netIrrigationMm,
+      netIrrigationRangeMm: r.netIrrigationRangeMm,
+      heat: r.heat,
+    })),
+    ipm: {
+      general: IPM_GENERAL,
+      aman: IPM_AMAN,
+      byRabi: Object.entries(IPM_BY_RABI).map(([key, tips]) => ({ key, cropBangla: RABI_CATALOG[key].cropBangla, cropEnglish: RABI_CATALOG[key].crop, tips })),
+    },
+    caveats: [
+      { bn: `IMERG Late ২০২৩ থেকে Final-এর চেয়ে কম বৃষ্টি দেখায় (তানোরে অনুপাত ${bnDigits(TANORE_CONDITIONS.rainLast30Days.lateFinalRatio)}); সাম্প্রতিক বৃষ্টির রায় তিনটি অনুমান মিলিয়ে দেওয়া হয়।`, en: `IMERG Late reads dry against Final since 2023 (ratio ${TANORE_CONDITIONS.rainLast30Days.lateFinalRatio} at Tanore); recent rain is judged from three estimates.` },
+      { bn: 'বৃষ্টি ও মাটির রস ~১০ কিমি ও ৯ কিমি গ্রিডের গড়, একক জমির নয়।', en: 'Rain and soil moisture are ~10 km and 9 km grid averages, not single fields.' },
+      { bn: 'আয়ের স্কোর দলের অনুমান; DAM দর ও কৃষকের খরচ বাকি।', en: 'Income scores are team estimates until DAM prices and farmer costs are in.' },
+      { bn: 'বালাই স্কোর নিয়মভিত্তিক; মাঠে পোকা গোনার তথ্য কর্মকর্তার পর্যবেক্ষণ থেকে আসবে।', en: 'The pest score is rule-based; field pest counts will come from officer observations.' },
+      { bn: 'বরেন্দ্রে বন্যা মডেল করা হয়নি; জমির শ্রেণি থেকে ধরা।', en: 'Floods are not modelled for Barind land; the score follows the land-type class.' },
+    ],
+    saaoNotes: advice.saao_technical_notes,
+    cattleHeat: TANORE_ADVISORIES.cattleHeat,
+    haorSkill: HAOR_FLASH_FLOOD.skill,
+    haorEscape: HAOR_FLASH_FLOOD.escape,
+  };
+}
+
+/** Everything the officer desk screen shows in one call. */
+function deskView(officer: (typeof desk.OFFICERS)[number]) {
+  const queue = desk.queue();
+  return {
+    officer,
+    pestNames: desk.PEST_NAMES,
+    queue,
+    callbacks: desk.callbacks(),
+    farmers: desk.farmers().map(f => {
+      const advice = adviseWithNarration(planRequest({}), f.id);
+      const top = advice.options[0];
+      return {
+        farmer: f,
+        observation: desk.latestObservation(f.id) ?? null,
+        queue: queue.find(q => q.farmerId === f.id) ?? null,
+        advice: {
+          topOptionBangla: top.nameBangla,
+          topOptionEnglish: top.nameEnglish,
+          fieldFreeBangla: top.fieldFreeDateBangla,
+          fieldFreeEnglish: top.fieldFreeDateEnglish,
+          thisSeason: advice.this_season,
+          thisSeasonOptionBangla: advice.options.find(o => o.id === advice.this_season_option_id)?.nameBangla ?? null,
+          thisSeasonOptionEnglish: advice.options.find(o => o.id === advice.this_season_option_id)?.nameEnglish ?? null,
+          pestScore: top.scores.pest,
+          verification: advice.verification,
+        },
+      };
+    }),
+  };
+}
+
+function dataRelease() {
+  return {
+    releaseVersion: RELEASE.id,
+    releaseDate: RELEASE.generatedOn,
+    researchCommit: RELEASE.researchCommit,
+    generator: RELEASE.generator,
+    pilotSitesCovered: 1,
+    modelledUnions: SUPPORTED_UNIONS,
+    datasets: [
+      { name: 'NASA POWER (daily)', parameter: 'Tmax, Tmin, dew point, wind, radiation -> FAO-56 ET0', timePeriod: '2001-2025', spatialResolution: '0.5° x 0.625°', latency: '~2-3 days', freshness: 'research release', groundCorrection: `Tmax/Tmin bias-corrected by month against BMD ${TANORE_CONDITIONS.bmdStation} (NOAA GSOD, ${TANORE_CONDITIONS.bmdStationKm} km)`, status: 'operational' },
+      { name: 'NASA GPM IMERG Final (daily, via POWER)', parameter: 'Rain for the 25-season water-balance replay', timePeriod: '2001-2025', spatialResolution: '0.1° (~10 km)', latency: '~3.5 months', freshness: 'research release', groundCorrection: 'Checked against the BMD Rajshahi gauge (Jun-Oct)', status: 'operational' },
+      { name: 'NASA GPM IMERG Late (daily, via Giovanni)', parameter: 'Rain in the last 30 days', timePeriod: `${TANORE_CONDITIONS.rainLast30Days.from} to ${TANORE_CONDITIONS.rainLast30Days.to}`, spatialResolution: '0.1° (~10 km)', latency: '~14 hours', freshness: 'recent', groundCorrection: `Late reads dry against Final since 2023 (ratio ${TANORE_CONDITIONS.rainLast30Days.lateFinalRatio}); cross-checked with Final-scaled Late and MERRA-2`, status: 'cross-checked' },
+      { name: 'NASA SMAP L4 (SPL4SMGP v008)', parameter: 'Root-zone soil moisture (0-100 cm)', timePeriod: `2023-09-27 to ${TANORE_CONDITIONS.smap?.date ?? 'n/a'}`, spatialResolution: '9 km', latency: '~2-3 days', freshness: 'recent', groundCorrection: `Agrees with GLDAS-2.2 root zone (Spearman ${TANORE_CONDITIONS.rootZoneGldasMm.smapSpearman})`, status: 'operational' },
+      { name: 'NASA GLDAS-2.2 CLSM (GRACE-assimilated)', parameter: 'Groundwater storage and root-zone water', timePeriod: '2003-2025', spatialResolution: '0.25°', latency: 'monthly updates', freshness: 'research release', groundCorrection: 'GRACE/GRACE-FO terrestrial water storage assimilated', status: 'operational' },
+      { name: 'NASA MODIS MOD13Q1', parameter: 'NDVI: crop cycles and winter crop cover', timePeriod: '2001-2026', spatialResolution: '250 m (median of 9 x 9 pixels)', latency: '16 days', freshness: 'research release', groundCorrection: 'Landscape around the pilot point, not single fields', status: 'operational' },
+      { name: 'SRDI Fertilizer Recommendation System', parameter: 'Talanda union card: soil type, land type, fertilizer doses', timePeriod: 'current card', spatialResolution: 'Union (Talanda)', latency: 'static', freshness: 'current', groundCorrection: 'SRDI soil-test based recommendations', status: 'operational' },
+      { name: 'BRRI / BARI / BWMRI handbooks', parameter: 'Durations, seedbed and sowing windows', timePeriod: 'current editions', spatialResolution: 'National', latency: 'static', freshness: 'current', groundCorrection: 'Research station trials', status: 'operational' },
+      { name: 'FAO GLW4 cattle (2015)', parameter: 'Cattle per km² for the fodder score', timePeriod: '2015', spatialResolution: 'District', latency: 'static', freshness: 'dated', groundCorrection: 'Gridded census model', status: 'operational' },
+      { name: 'Farm-gate prices (DAM) and farmer costs', parameter: 'Income score', timePeriod: 'pending', spatialResolution: '-', latency: '-', freshness: 'missing', groundCorrection: 'Income uses illustrative team estimates until collected', status: 'missing' },
+    ],
+    missingValuePolicy: 'Missing days stay missing and are reported, never filled with zero. POWER temperatures are bias-corrected by month against the nearest BMD station. Recent IMERG Late rain is never judged alone: it is compared with Final-scaled Late and MERRA-2.',
+  };
+}
+
+const server = http.createServer(async (req, res) => {
+  const url = new URL(req.url || '/', `http://${req.headers.host}`);
+  const pathname = url.pathname;
+
+  // Handle CORS preflight
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204, {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type',
+    });
+    res.end();
+    return;
+  }
+
+  try {
+    // API: SAAO Overview
+    if (pathname === '/api/v1/overview' && req.method === 'GET') {
+      return sendJSON(res, 200, overview());
+    }
+
+    // API: Generate Rotation Advice
+    if (pathname === '/api/v1/advice' && req.method === 'POST') {
+      const body = await parseBody(req);
+      return sendJSON(res, 200, adviseWithNarration(planRequest(body), body.farmerId));
+    }
+
+    // API: Narrate Advice
+    if (pathname === '/api/v1/narrate' && req.method === 'POST') {
+      const body = await parseBody(req);
+      const advice = body.advice;
+      const selectedOptionId = body.selectedOptionId;
+      const option = advice?.options?.find((o: any) => o.id === selectedOptionId) || advice?.options?.[0];
+
+      if (!advice || !option) {
+        return sendJSON(res, 400, { error: 'Advice object and option are required' });
+      }
+
+      // Check if user requested mock local LLM or template
+      if (body.simulateLLM) {
+        const mockLLM = {
+          async generate() {
+            const water = option.dimensionDetails.water.metrics;
+            return `${bnOf(advice.scope.union_name_bangla)} জন্য ${option.nameBangla} উপযোগী। ${bnDigits(water.totalSeasonsSimulated)} মৌসুমে ${bnDigits(water.amanRescueIrrigationSeasons)} বার সম্পূরক সেচ লেগেছে এবং ${bnDateOf(option.fieldFreeDateBangla)} মধ্যে জমি খালি হবে।`;
+          },
+        };
+        const customValidator = new DualGateNarrationValidator(mockLLM);
+        const result = await customValidator.narrate(advice, option);
+        return sendJSON(res, 200, result);
+      }
+
+      const result = await dualGateValidator.narrate(advice, option);
+      return sendJSON(res, 200, result);
+    }
+
+    // API: Channel Events (simulated IVR keypad): re-ranks the rotations for the chosen priority
+    if (pathname === '/api/v1/channel-events' && req.method === 'POST') {
+      const body = await parseBody(req);
+      const keypad = String(body.keypad || '1');
+      const choice = KEYPAD_PRIORITIES[keypad];
+      const top = choice ? rotationEngine.generateAdvice(planRequest({ farmerPriorities: choice.priorities })).options[0] : null;
+      // Keypad 9: the farmer asks for their Krishi officer; the request tops the officer desk queue.
+      const callback = keypad === '9' ? desk.requestCallback(String(body.farmerId || 'F01'), 'ivr_keypad_9') : null;
+
+      return sendJSON(res, 200, {
+        callId: `call_${Date.now()}`,
+        farmerPhone: body.phone || '017XXXXXXXX',
+        status: 'delivered',
+        keypadInput: keypad,
+        acknowledgementBangla: top
+          ? `আপনার পছন্দ "${choice.label}" নথিভুক্ত হয়েছে। এই অগ্রাধিকারে শীর্ষে: ${top.nameBangla}।`
+          : 'আপনার অনুরোধ কৃষি কর্মকর্তার কাছে পাঠানো হয়েছে; তিনি আপনাকে ফোন করবেন।',
+        acknowledgementEnglish: top
+          ? `Your choice "${choice.labelEnglish}" is recorded. Top option for it: ${top.nameEnglish}.`
+          : 'Your request went to your Krishi officer, who will call you back.',
+        topOptionId: top?.id ?? null,
+        callbackId: callback?.id ?? null,
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    // API: haor flash-flood early warning (IMERG at Sohra, 25-season hindcast and today's status)
+    if (pathname === '/api/v1/haor/flash-flood' && req.method === 'GET') {
+      return sendJSON(res, 200, { ...HAOR_FLASH_FLOOD, status: haorStatus() });
+    }
+
+    // API: Real NASA Weather Observations (NASA POWER daily agroclimatology & SMAP soil moisture)
+    if (pathname === '/api/v1/weather' && req.method === 'GET') {
+      const lat = parseFloat(url.searchParams.get('lat') || '24.62');
+      const lon = parseFloat(url.searchParams.get('lon') || '88.56');
+      const weather = await getNasaWeather(lat, lon);
+      return sendJSON(res, 200, weather);
+    }
+
+    // API: River Erosion Information (BWDB station records, CEGIS vulnerability & IMERG basin rain)
+    if (pathname === '/api/v1/erosion' && req.method === 'GET') {
+      const river = url.searchParams.get('river') || 'jamuna';
+      const erosion = getRiverErosion(river);
+      return sendJSON(res, 200, erosion);
+    }
+
+    // API: Grounded Bengali AI Agricultural Assistant
+    if (pathname === '/api/v1/ai/ask' && req.method === 'POST') {
+      const body = await parseBody(req);
+      const answer = await askAiAssistant(body);
+      return sendJSON(res, 200, answer);
+    }
+
+    // API: Unified Authentication (Farmer and SAAO Officer)
+    if (pathname === '/api/v1/auth/login' && req.method === 'POST') {
+      const body = await parseBody(req);
+      const session = desk.loginUser(body);
+      return session ? sendJSON(res, 200, session) : sendJSON(res, 401, { error: 'Invalid login credentials' });
+    }
+    if (pathname === '/api/v1/auth/session' && req.method === 'GET') {
+      const user = desk.userForToken(req.headers.authorization);
+      return user ? sendJSON(res, 200, { user }) : sendJSON(res, 401, { error: 'No active session' });
+    }
+    if (pathname === '/api/v1/auth/logout' && req.method === 'POST') {
+      const ok = desk.logout(req.headers.authorization);
+      return sendJSON(res, 200, { ok });
+    }
+
+    // API: Krishi officer desk (sign-in required for everything except the officer list and login)
+    if (pathname === '/api/v1/officers' && req.method === 'GET') {
+      return sendJSON(res, 200, desk.OFFICERS);
+    }
+    if (pathname === '/api/v1/officer/login' && req.method === 'POST') {
+      const body = await parseBody(req);
+      const session = desk.login(String(body.officerId ?? ''), String(body.accessCode ?? ''));
+      return session ? sendJSON(res, 200, session) : sendJSON(res, 401, { error: 'Wrong officer ID or access code' });
+    }
+    if (pathname.startsWith('/api/v1/officer/')) {
+      const officer = desk.officerForToken(req.headers.authorization);
+      if (!officer) {
+        return sendJSON(res, 401, { error: 'Officer sign-in required' });
+      }
+      if (pathname === '/api/v1/officer/desk' && req.method === 'GET') {
+        return sendJSON(res, 200, deskView(officer));
+      }
+      if (pathname === '/api/v1/officer/observations' && req.method === 'POST') {
+        const body = await parseBody(req);
+        const result = desk.addObservation(officer.id, body);
+        if (result.error) return sendJSON(res, 400, { error: result.error });
+        return sendJSON(res, 200, { observation: result.observation, advice: adviseWithNarration(planRequest({}), body.farmerId) });
+      }
+      const resolve = /^\/api\/v1\/officer\/callbacks\/([^/]+)\/resolve$/.exec(pathname);
+      if (resolve && req.method === 'POST') {
+        const request = desk.resolveCallback(decodeURIComponent(resolve[1]));
+        return request ? sendJSON(res, 200, request) : sendJSON(res, 404, { error: 'Unknown call-back request' });
+      }
+      if (pathname === '/api/v1/officer/knowledge' && req.method === 'GET') {
+        return sendJSON(res, 200, knowledgePack());
+      }
+      if (pathname === '/api/v1/officer/reset' && req.method === 'POST') {
+        desk.resetDesk();
+        return sendJSON(res, 200, { ok: true });
+      }
+      return sendJSON(res, 404, { error: 'Unknown officer endpoint' });
+    }
+
+    // API: Data Quality & Provenance
+    if (pathname === '/api/v1/data-release' && req.method === 'GET') {
+      return sendJSON(res, 200, dataRelease());
+    }
+
+    // Serve static files from apps/saao-dashboard/public
+    let filePath = path.join(PUBLIC_DIR, pathname === '/' ? 'index.html' : pathname);
+    if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
+      filePath = path.join(PUBLIC_DIR, 'index.html');
+    }
+
+    const ext = path.extname(filePath).toLowerCase();
+    const mimeTypes: Record<string, string> = {
+      '.html': 'text/html; charset=utf-8',
+      '.css': 'text/css; charset=utf-8',
+      '.js': 'application/javascript; charset=utf-8',
+      '.json': 'application/json; charset=utf-8',
+      '.png': 'image/png',
+      '.svg': 'image/svg+xml',
+    };
+
+    const contentType = mimeTypes[ext] || 'text/plain';
+    const content = fs.readFileSync(filePath);
+    res.writeHead(200, { 'Content-Type': contentType });
+    res.end(content);
+  } catch (err: any) {
+    if (err instanceof UnsupportedUnionError) {
+      return sendJSON(res, 422, { error: err.message, supportedUnions: SUPPORTED_UNIONS });
+    }
+    console.error('Server error:', err);
+    sendJSON(res, 500, { error: err.message || 'Internal Server Error' });
+  }
+});
+
+server.listen(PORT, () => {
+  console.log(`✓ EDEN API & SAAO Dashboard server listening on http://localhost:${PORT} (data release ${RELEASE.id})`);
+});

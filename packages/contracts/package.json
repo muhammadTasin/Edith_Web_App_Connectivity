@@ -1,0 +1,13 @@
+{
+  "name": "@project-eden/contracts",
+  "version": "1.0.0",
+  "description": "Shared typed contracts, schemas and plugin interfaces for EDEN",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "author": "muhammadTasin",
+  "license": "MIT"
+}

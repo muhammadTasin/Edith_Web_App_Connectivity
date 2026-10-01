@@ -1,0 +1,18 @@
+{
+  "name": "project-eden",
+  "version": "1.0.0",
+  "description": "Project EDEN — Earth Data & Environment Navigator; Bangla-first crop-rotation decision support system",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*",
+    "services/*"
+  ],
+  "scripts": {
+    "start": "node --experimental-strip-types services/api/src/server.ts",
+    "test": "node --experimental-strip-types test_pipeline.ts && node test_server.js"
+  },
+  "author": "muhammadTasin",
+  "license": "MIT"
+}
