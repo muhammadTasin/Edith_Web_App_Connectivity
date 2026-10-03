@@ -26,6 +26,9 @@ let audioState = 'idle'; // idle | playing | done | novoice
 let audioTimer = null;
 let simulatedAudioProgress = 0;
 let simulatedAudioInterval = null;
+let weatherLocations = [];
+let weatherForecastData = null;
+let selectedWeatherLocation = null;
 
 const BN_DIGITS = ['০', '১', '২', '৩', '৪', '৫', '৬', '৭', '৮', '৯'];
 const BN_MONTHS = ['জানুয়ারি', 'ফেব্রুয়ারি', 'মার্চ', 'এপ্রিল', 'মে', 'জুন', 'জুলাই', 'আগস্ট', 'সেপ্টেম্বর', 'অক্টোবর', 'নভেম্বর', 'ডিসেম্বর'];
@@ -98,6 +101,8 @@ window.setLanguage = function(next) {
     localStorage.setItem('eden.lang', lang);
   } catch {}
   applyStaticText();
+  renderWeatherLocationSelectors();
+  if (weatherForecastData && selectedWeatherLocation) renderWeatherForecast(weatherForecastData, selectedWeatherLocation);
   renderAll();
 };
 
@@ -929,40 +934,175 @@ window.switchFarmerTab = function(tab) {
   $(`f-tab-${tab}`)?.classList.add('active');
   $(`f-panel-${tab}`)?.classList.add('active');
 
-  if (tab === 'weather') loadNasaWeather();
+  if (tab === 'weather') loadWeatherForecast();
   else if (tab === 'erosion') fetchRiverErosion('jamuna');
 };
 
-async function loadNasaWeather() {
+const weatherLocationName = (location) => tr(
+  `${location.upazilaBn}, ${location.districtBn}`,
+  `${location.upazilaEn}, ${location.districtEn}`,
+);
+
+function renderWeatherLocationSelectors() {
+  const districtSelect = $('weatherDistrictSelect');
+  const upazilaSelect = $('weatherUpazilaSelect');
+  if (!districtSelect || !upazilaSelect || !weatherLocations.length) return;
+
+  const previousDistrict = districtSelect.value;
+  const previousUpazila = upazilaSelect.value;
+  const districtMap = new Map();
+  weatherLocations.forEach(location => {
+    if (!districtMap.has(location.districtId)) {
+      districtMap.set(location.districtId, { id: location.districtId, bn: location.districtBn, en: location.districtEn });
+    }
+  });
+  const sortLocalName = (a, b) => lang === 'en'
+    ? a.en.localeCompare(b.en)
+    : a.bn.localeCompare(b.bn, 'bn');
+  const districts = [...districtMap.values()].sort(sortLocalName);
+  const savedDistrict = districts.some(d => d.id === previousDistrict)
+    ? previousDistrict
+    : selectedWeatherLocation?.districtId || districts.find(d => d.en === 'Rajshahi')?.id || districts[0]?.id;
+  districtSelect.innerHTML = districts.map(d => `<option value="${escapeHtml(d.id)}">${escapeHtml(tr(d.bn, d.en))}</option>`).join('');
+  districtSelect.value = savedDistrict;
+  districtSelect.disabled = false;
+
+  const inDistrict = weatherLocations.filter(location => location.districtId === savedDistrict).sort((a, b) => sortLocalName(
+    { bn: a.upazilaBn, en: a.upazilaEn },
+    { bn: b.upazilaBn, en: b.upazilaEn },
+  ));
+  const selectedUpazila = inDistrict.some(location => location.id === previousUpazila)
+    ? previousUpazila
+    : selectedWeatherLocation?.districtId === savedDistrict ? selectedWeatherLocation.id : '';
+  upazilaSelect.innerHTML = `<option value="">${tr('উপজেলা বেছে নিন', 'Choose an upazila')}</option>${inDistrict.map(location => `<option value="${escapeHtml(location.id)}">${escapeHtml(tr(location.upazilaBn, location.upazilaEn))}</option>`).join('')}`;
+  upazilaSelect.value = selectedUpazila;
+  upazilaSelect.disabled = false;
+}
+
+async function initializeWeatherLocations() {
+  const districtSelect = $('weatherDistrictSelect');
+  const upazilaSelect = $('weatherUpazilaSelect');
+  if (!districtSelect || !upazilaSelect) return;
+
   try {
-    const res = await fetch('/api/v1/weather?lat=24.62&lon=88.56');
-    const data = await res.json();
-    if (data.latest) {
-      const t = data.latest.t2m ?? 28;
-      const r = data.latest.rainMm ?? data.latest.precipMm ?? 0;
-      const m = data.latest.rootZoneMoistureM3M3 ?? 0.31;
-      setText('fwTemp', `${num(t.toFixed(1))}° সে`);
-      setText('fwMoisture', `${num(Math.round(m * 100))}%`);
-      setText('fwRain', `${num(r.toFixed(1))} মিমি`);
+    const response = await fetch('/data/bangladesh-upazilas.json');
+    if (!response.ok) throw new Error(`Location list request failed: ${response.status}`);
+    const data = await response.json();
+    weatherLocations = Array.isArray(data.locations) ? data.locations : [];
+    if (!weatherLocations.length) throw new Error('Location list is empty');
+
+    let savedId = '';
+    try { savedId = localStorage.getItem('eden.weather.location') || ''; } catch {}
+    selectedWeatherLocation = weatherLocations.find(location => location.id === savedId)
+      || weatherLocations.find(location => location.districtEn === 'Rajshahi' && location.upazilaEn === 'Tanore')
+      || null;
+    renderWeatherLocationSelectors();
+    if (selectedWeatherLocation) {
+      $('weatherDistrictSelect').value = selectedWeatherLocation.districtId;
+      $('weatherUpazilaSelect').value = selectedWeatherLocation.id;
+      setText('weatherDataNotice', tr(
+        `${weatherLocationName(selectedWeatherLocation)}-এর আবহাওয়া পূর্বাভাস লোড করতে আবহাওয়া ট্যাব খুলুন।`,
+        `Open the Weather tab to load the forecast for ${weatherLocationName(selectedWeatherLocation)}.`,
+      ));
     }
-    const days = data.recentDays || data.dailyForecast || [];
-    if (days.length && $('weatherForecastList')) {
-      setHtml('weatherForecastList', days.map(d => {
-        const tMax = d.t2mMax ?? d.tMax ?? d.t2m ?? 30;
-        const tMin = d.t2mMin ?? d.tMin ?? 24;
-        const rain = d.rainMm ?? 0;
-        return `
-          <div style="background: var(--surface-container-low); padding: 8px; border-radius: var(--radius-sm); text-align: center;">
-            <span style="font-size: 11px; font-weight: 700; color: var(--on-surface-variant); display: block;">${escapeHtml(d.date.slice(5))}</span>
-            <span class="material-symbols-outlined" style="font-size: 24px; color: var(--primary); margin: 4px 0;">${rain > 5 ? 'rainy' : rain > 0 ? 'partly_cloudy_day' : 'wb_sunny'}</span>
-            <span style="font-size: 12px; font-weight: 700; display: block;">${num(tMax.toFixed(0))}° / ${num(tMin.toFixed(0))}°</span>
-            <span style="font-size: 10px; color: var(--water);">${num(rain.toFixed(1))} মিমি</span>
-          </div>
-        `;
-      }).join(''));
-    }
-  } catch (err) {
-    console.error('Weather load error:', err);
+    districtSelect.addEventListener('change', () => {
+      selectedWeatherLocation = null;
+      weatherForecastData = null;
+      renderWeatherLocationSelectors();
+      setText('fwTemp', '—');
+      setText('fwHumidity', '—');
+      setText('fwRain', '—');
+      setHtml('weatherForecastList', '');
+      setText('weatherDataNotice', tr('উপজেলার আবহাওয়া দেখতে তালিকা থেকে উপজেলা বেছে নিন।', 'Choose an upazila to view its weather forecast.'));
+      try { localStorage.removeItem('eden.weather.location'); } catch {}
+    });
+    upazilaSelect.addEventListener('change', () => {
+      selectedWeatherLocation = weatherLocations.find(location => location.id === upazilaSelect.value) || null;
+      weatherForecastData = null;
+      if (!selectedWeatherLocation) return;
+      try { localStorage.setItem('eden.weather.location', selectedWeatherLocation.id); } catch {}
+      loadWeatherForecast();
+    });
+  } catch (error) {
+    console.error('Weather location list error:', error);
+    districtSelect.disabled = true;
+    upazilaSelect.disabled = true;
+    setText('weatherDataNotice', tr('বাংলাদেশের জেলা-উপজেলার তালিকা লোড করা যায়নি। আবার চেষ্টা করতে পৃষ্ঠা রিলোড করুন।', 'Could not load Bangladesh locations. Reload the page to try again.'));
+  }
+}
+
+const weatherIcon = (code) => {
+  if (code === 0 || code === 1) return 'wb_sunny';
+  if (code === 2 || code === 3) return 'partly_cloudy_day';
+  if (code === 45 || code === 48) return 'foggy';
+  if (code >= 51 && code <= 67) return 'rainy';
+  if (code >= 71 && code <= 77) return 'weather_snowy';
+  if (code >= 80 && code <= 82) return 'rainy';
+  if (code === 85 || code === 86) return 'weather_snowy';
+  if (code >= 95) return 'thunderstorm';
+  return 'cloud';
+};
+
+function renderWeatherForecast(data, location) {
+  const forecast = data?.forecast;
+  if (!forecast?.current || !Array.isArray(forecast.daily)) return;
+  const current = forecast.current;
+  const locale = lang === 'en' ? 'en-BD' : 'bn-BD';
+  const dateFormatter = new Intl.DateTimeFormat(locale, { weekday: 'short', day: 'numeric', month: 'short', timeZone: forecast.timezone || 'Asia/Dhaka' });
+  const currentTemp = current.temperatureC == null ? NaN : Number(current.temperatureC);
+  const humidity = current.relativeHumidityPct == null ? NaN : Number(current.relativeHumidityPct);
+  const upcomingHours = (forecast.hourly || []).filter(hour => hour.time >= current.time).slice(0, 24);
+  const hasNextDayRain = upcomingHours.length === 24 && upcomingHours.every(hour => hour.precipitationMm != null && Number.isFinite(Number(hour.precipitationMm)));
+  const nextDayRain = hasNextDayRain ? upcomingHours.reduce((sum, hour) => sum + Number(hour.precipitationMm), 0) : NaN;
+  setText('fwTemp', Number.isFinite(currentTemp) ? `${num(currentTemp.toFixed(1))}°C` : '—');
+  setText('fwHumidity', Number.isFinite(humidity) ? `${num(Math.round(humidity))}%` : '—');
+  setText('fwRain', Number.isFinite(nextDayRain) ? `${num(nextDayRain.toFixed(1))} ${tr('মিমি', 'mm')}` : '—');
+
+  const modelNotice = lang === 'en' ? forecast.modelNoticeEnglish : forecast.modelNoticeBangla;
+  const updateTime = forecast.fetchedAt ? new Date(forecast.fetchedAt).toLocaleString(locale, { dateStyle: 'medium', timeStyle: 'short' }) : '';
+  setHtml('weatherDataNotice', `${escapeHtml(weatherLocationName(location))} · ${escapeHtml(modelNotice || tr('মডেল পূর্বাভাস; স্থানীয় আবহাওয়া ভিন্ন হতে পারে।', 'Model forecast; local conditions may vary.'))}<br>${escapeHtml(tr('সর্বশেষ হালনাগাদ', 'Updated'))}: ${escapeHtml(updateTime)}`);
+  setHtml('weatherForecastList', forecast.daily.map(day => {
+    const max = day.temperatureMaxC == null ? NaN : Number(day.temperatureMaxC);
+    const min = day.temperatureMinC == null ? NaN : Number(day.temperatureMinC);
+    const rain = day.precipitationMm == null ? NaN : Number(day.precipitationMm);
+    const date = day.date ? dateFormatter.format(new Date(`${day.date}T12:00:00`)) : '';
+    return `<div class="weather-day-card">
+      <span class="weather-day-date">${escapeHtml(date)}</span>
+      <span class="material-symbols-outlined weather-day-icon">${weatherIcon(Number(day.weatherCode))}</span>
+      <span class="weather-day-temperature">${num(Number.isFinite(max) ? max.toFixed(0) : '—')}° / ${num(Number.isFinite(min) ? min.toFixed(0) : '—')}°</span>
+      <span class="weather-day-rain">${Number.isFinite(rain) ? `${num(rain.toFixed(1))} ${tr('মিমি', 'mm')}` : '—'}</span>
+    </div>`;
+  }).join(''));
+}
+
+async function loadWeatherForecast() {
+  const location = selectedWeatherLocation;
+  if (!location) return;
+  setText('weatherDataNotice', tr(
+    `${weatherLocationName(location)}-এর পূর্বাভাস লোড হচ্ছে…`,
+    `Loading the forecast for ${weatherLocationName(location)}…`,
+  ));
+  try {
+    const query = new URLSearchParams({ lat: String(location.lat), lon: String(location.lon) });
+    const response = await fetch(`/api/v1/weather/forecast?${query}`);
+    if (!response.ok) throw new Error(`Forecast request failed: ${response.status}`);
+    const data = await response.json();
+    if (!data.forecast?.current || !Array.isArray(data.forecast.daily)) throw new Error('Forecast data is unavailable');
+    if (selectedWeatherLocation?.id !== location.id) return;
+    weatherForecastData = data;
+    renderWeatherForecast(data, location);
+  } catch (error) {
+    console.error('Weather forecast load error:', error);
+    if (selectedWeatherLocation?.id !== location.id) return;
+    weatherForecastData = null;
+    setText('weatherDataNotice', tr(
+      `${weatherLocationName(location)}-এর পূর্বাভাস আনা যায়নি। সংযোগ পরীক্ষা করে আবার চেষ্টা করুন।`,
+      `Could not load a forecast for ${weatherLocationName(location)}. Check the connection and try another upazila.`,
+    ));
+    setHtml('weatherForecastList', '');
+    setText('fwTemp', '—');
+    setText('fwHumidity', '—');
+    setText('fwRain', '—');
   }
 }
 
@@ -1292,6 +1432,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   } catch {}
 
   applyStaticText();
+  await initializeWeatherLocations();
   await loadOverview();
   await window.runPlannerCalculation({ switchScreenAfter: false });
   await loadDataQualityTable();

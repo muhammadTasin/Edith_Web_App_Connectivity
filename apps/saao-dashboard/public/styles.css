@@ -580,6 +580,94 @@ html[lang="en"] body {
   margin-bottom: 20px;
 }
 
+.weather-location-controls {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(220px, 1fr));
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.weather-location-field {
+  display: grid;
+  gap: 6px;
+  color: var(--on-surface-variant);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.weather-location-field .form-control {
+  min-height: 44px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--outline-variant);
+  border-radius: var(--radius-sm);
+  background: var(--surface-container-lowest);
+  color: var(--on-surface);
+  font: inherit;
+}
+
+.weather-location-field .form-control:focus-visible {
+  outline: 2px solid var(--primary-light);
+  outline-offset: 2px;
+}
+
+.weather-location-note {
+  min-height: 36px;
+  margin: 4px 0 16px;
+  color: var(--on-surface-variant);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.weather-forecast-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(128px, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.weather-day-card {
+  display: flex;
+  min-height: 126px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 10px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-container-low);
+  text-align: center;
+}
+
+.weather-day-date {
+  color: var(--on-surface-variant);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.weather-day-icon {
+  color: var(--primary);
+  font-size: 26px;
+}
+
+.weather-day-temperature {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.weather-day-rain,
+.weather-attribution {
+  color: var(--water);
+  font-size: 11px;
+}
+
+.weather-attribution {
+  display: block;
+  margin-top: 14px;
+  color: var(--on-surface-variant);
+  line-height: 1.5;
+}
+
 .kpi-card {
   background: var(--surface-container-lowest);
   border: 1px solid var(--outline-variant);
@@ -1540,6 +1628,12 @@ input:checked + .slider-round:before {
   }
   .kpi-row {
     grid-template-columns: 1fr;
+  }
+  .weather-location-controls {
+    grid-template-columns: 1fr;
+  }
+  .weather-forecast-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .audio-controls {
     flex-wrap: wrap;

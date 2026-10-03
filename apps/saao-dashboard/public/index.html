@@ -1090,25 +1090,45 @@
             <div class="card-header">
               <h3 class="card-title" data-i18n="farmer.weatherForecast">
                 <span class="material-symbols-outlined card-title-icon">wb_sunny</span>
-                ৭-দিনের নাসা কৃষি-আবহাওয়া ও আর্দ্রতা পূর্বাভাস
+                নির্বাচিত স্থানের ৭ দিনের আবহাওয়া পূর্বাভাস
               </h3>
-              <span class="badge badge-info">NASA POWER + SMAP</span>
+              <span class="badge badge-info" data-i18n="weather.provider">Open-Meteo forecast</span>
             </div>
+            <div class="weather-location-controls">
+              <label class="weather-location-field" for="weatherDistrictSelect">
+                <span data-i18n="weather.district">জেলা</span>
+                <select class="form-control" id="weatherDistrictSelect" autocomplete="off" disabled>
+                  <option value="" data-i18n="weather.loading">জেলা লোড হচ্ছে…</option>
+                </select>
+              </label>
+              <label class="weather-location-field" for="weatherUpazilaSelect">
+                <span data-i18n="weather.upazila">উপজেলা</span>
+                <select class="form-control" id="weatherUpazilaSelect" autocomplete="off" disabled>
+                  <option value="" data-i18n="weather.chooseDistrict">আগে জেলা বেছে নিন</option>
+                </select>
+              </label>
+            </div>
+            <p class="weather-location-note" id="weatherDataNotice" aria-live="polite" data-i18n="weather.initialNotice">
+              বর্তমান মডেল পূর্বাভাস দেখাতে জেলা ও উপজেলা বেছে নিন।
+            </p>
             <div class="kpi-row" id="weatherMetricsRow">
               <div class="kpi-card c-secondary">
                 <div class="kpi-card-icon"><span class="material-symbols-outlined">thermostat</span></div>
-                <div><div class="kpi-val" id="fwTemp">২৯.৫° সে</div><div class="kpi-label">সর্বোচ্চ তাপমাত্রা</div></div>
+                <div><div class="kpi-val" id="fwTemp">—</div><div class="kpi-label" data-i18n="weather.currentTemperature">বর্তমান তাপমাত্রা</div></div>
               </div>
               <div class="kpi-card c-tertiary">
-                <div class="kpi-card-icon"><span class="material-symbols-outlined">water_drop</span></div>
-                <div><div class="kpi-val" id="fwMoisture">৬২%</div><div class="kpi-label">মাটির আর্দ্রতা (শিকড় স্তর)</div></div>
+                <div class="kpi-card-icon"><span class="material-symbols-outlined">humidity_percentage</span></div>
+                <div><div class="kpi-val" id="fwHumidity">—</div><div class="kpi-label" data-i18n="weather.relativeHumidity">আপেক্ষিক আর্দ্রতা</div></div>
               </div>
               <div class="kpi-card c-primary">
                 <div class="kpi-card-icon"><span class="material-symbols-outlined">rainy</span></div>
-                <div><div class="kpi-val" id="fwRain">০.০ মিমি</div><div class="kpi-label">বৃষ্টির সম্ভাবনা (৪৮ ঘণ্টা)</div></div>
+                <div><div class="kpi-val" id="fwRain">—</div><div class="kpi-label" data-i18n="weather.next24hRain">আগামী ২৪ ঘণ্টার বৃষ্টি</div></div>
               </div>
             </div>
-            <div id="weatherForecastList" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-top: 14px;"></div>
+            <div id="weatherForecastList" class="weather-forecast-list" aria-live="polite"></div>
+            <small class="weather-attribution" data-i18n="weather.attribution">
+              <a href="https://open-meteo.com/" target="_blank" rel="noreferrer">Open-Meteo</a> মডেল পূর্বাভাস। জেলার ও উপজেলার নাম <a href="https://bangladesh.gov.bd/views/upazila-list/" target="_blank" rel="noreferrer">বাংলাদেশ জাতীয় তথ্য বাতায়ন</a> এবং স্থানাঙ্ক <a href="https://github.com/open-admin-data/bangladesh-administrative-divisions" target="_blank" rel="noreferrer">Open Admin Data Bangladesh</a> (CC BY 4.0) থেকে; স্থানাঙ্ক প্রশাসনিক এলাকার আনুমানিক প্রতিনিধি বিন্দু।
+            </small>
           </div>
         </div>
 

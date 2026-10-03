@@ -13,6 +13,12 @@ Bangla-first web dashboard and API for Project EDEN / Mather Kotha (মাঠে
 
 The dashboard and API run together: the API serves the website and handles its data requests.
 
+## Weather location selector
+
+The website's Weather tab lets a user choose from Bangladesh's 64 districts and 500 upazilas, including the five newly approved upazilas reported by BSS in May 2026. The choice is saved in the browser and drives a seven-day forecast request to `/api/v1/weather/forecast`; the API gets model forecast data from [Open-Meteo](https://open-meteo.com/) and caches it for 15 minutes. Forecasts are numerical model estimates, not local station observations.
+
+The location list starts from [Open Admin Data Bangladesh](https://github.com/open-admin-data/bangladesh-administrative-divisions) (CC BY 4.0); district/upazila names are checked against the [Bangladesh National Portal](https://bangladesh.gov.bd/views/upazila-list/). It includes the five recently approved upazilas reported by [BSS](https://www.bssnews.net/news-flash/385117). The portal page currently reports 499 upazilas while BSS reports five new approvals on top of the 495-entry base list, so the selector includes 500 entries, including Matamuhuri. Coordinates are approximate administrative-area reference points, not a selected farm's GPS position; the five additions use representative points.
+
 ## Run locally
 
 Requirements: Node.js 22.6 or newer.

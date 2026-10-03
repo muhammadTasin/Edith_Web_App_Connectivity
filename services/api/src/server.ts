@@ -14,6 +14,7 @@ import * as desk from './officer_desk.ts';
 import { DualGateNarrationValidator } from '../../../packages/narration-core/src/dual_gate_validator.ts';
 import { TemplateNarrator } from '../../../packages/narration-core/src/template_narrator.ts';
 import { getNasaWeather } from './weather.ts';
+import { getOpenMeteoForecast } from './open_meteo_weather.ts';
 import { getRiverErosion } from './erosion.ts';
 import { askAiAssistant } from './ai_assistant.ts';
 
@@ -497,6 +498,21 @@ const server = http.createServer(async (req, res) => {
     }
 
     // API: Real NASA Weather Observations (NASA POWER daily agroclimatology & SMAP soil moisture)
+    if (pathname === '/api/v1/weather/forecast' && req.method === 'GET') {
+      const lat = parseFloat(url.searchParams.get('lat') || '');
+      const lon = parseFloat(url.searchParams.get('lon') || '');
+      if (!Number.isFinite(lat) || lat < -90 || lat > 90 || !Number.isFinite(lon) || lon < -180 || lon > 180) {
+        return sendJSON(res, 400, { error: 'Invalid latitude or longitude' });
+      }
+      try {
+        const forecast = await getOpenMeteoForecast(lat, lon);
+        return sendJSON(res, 200, { location: { lat, lon }, forecast });
+      } catch (error: any) {
+        console.warn('Open-Meteo forecast request failed:', error?.message || error);
+        return sendJSON(res, 502, { error: 'Weather forecast is temporarily unavailable' });
+      }
+    }
+
     if (pathname === '/api/v1/weather' && req.method === 'GET') {
       const lat = parseFloat(url.searchParams.get('lat') || '24.62');
       const lon = parseFloat(url.searchParams.get('lon') || '88.56');
