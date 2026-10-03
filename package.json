@@ -11,7 +11,7 @@
   ],
   "scripts": {
     "start": "node --experimental-strip-types services/api/src/server.ts",
-    "test": "node --experimental-strip-types test_pipeline.ts && node test_server.js"
+    "test": "node --experimental-strip-types test_pipeline.ts && node --experimental-strip-types test_cattle.ts && node test_server.js"
   },
   "author": "muhammadTasin",
   "license": "MIT"

@@ -20,15 +20,48 @@ let officers = [];
 let officerSession = null; // { token, officer }
 let currentUser = null; // { id, role, nameBangla, nameEnglish, ... }
 let authToken = null;
+let activeRole = null; // 'visitor' | 'farmer' | 'officer' | null (entry screen)
 let officerDesk = null;
 let officerKnowledge = null;
 let audioState = 'idle'; // idle | playing | done | novoice
 let audioTimer = null;
-let simulatedAudioProgress = 0;
-let simulatedAudioInterval = null;
 let weatherLocations = [];
 let weatherForecastData = null;
+let weatherNasaData = null;
 let selectedWeatherLocation = null;
+
+// ---- API access (shared contract: docs/api-contract.md) ---------------------------------------------------------
+const API_BASE = String((typeof window !== 'undefined' && window.EDEN_CONFIG && window.EDEN_CONFIG.apiBase) || '').replace(/\/+$/, '');
+const api = (path, init) => fetch(`${API_BASE}${path}`, init);
+
+/** A failed API call with a machine-readable kind: offline | timeout | invalid_input | provider_unavailable | no_data | configuration_required | not_found | unauthorized | internal */
+class ApiFailure extends Error {
+  constructor(kind, message, status) { super(message); this.kind = kind; this.status = status; }
+}
+async function apiJson(path, init) {
+  let res;
+  try {
+    res = await api(path, init);
+  } catch {
+    throw new ApiFailure(navigator.onLine === false ? 'offline' : 'network', 'Network request failed');
+  }
+  let body = null;
+  try { body = await res.json(); } catch { /* not JSON */ }
+  if (!res.ok) throw new ApiFailure(body?.error?.code || 'internal', body?.error?.message || `HTTP ${res.status}`, res.status);
+  return body;
+}
+function failureText(failure) {
+  switch (failure?.kind) {
+    case 'offline': return tr('আপনি অফলাইনে আছেন। সংযোগ পরীক্ষা করুন।', 'You appear to be offline. Check your connection.');
+    case 'network': return tr('সার্ভারের সাথে সংযোগ করা যায়নি।', 'Could not reach the server.');
+    case 'invalid_input': return tr('অবস্থান বা তথ্য সঠিক নয়: ', 'Invalid input: ') + (failure.message || '');
+    case 'provider_unavailable': return tr('তথ্য সরবরাহকারী সেবা (আবহাওয়া/নাসা) এখন পাওয়া যাচ্ছে না। পরে আবার চেষ্টা করুন।', 'The data provider is unavailable right now. Try again later.');
+    case 'no_data': return tr('এই অবস্থানের জন্য কোনো উপাত্ত পাওয়া যায়নি।', 'No data is available for this location.');
+    case 'configuration_required': return tr('সার্ভারে এই সুবিধার কনফিগারেশন নেই।', 'This capability is not configured on the server.');
+    case 'unauthorized': return tr('অনুমতি নেই।', 'Not authorised.');
+    default: return tr('একটি ত্রুটি হয়েছে: ', 'Something went wrong: ') + (failure?.message || '');
+  }
+}
 
 const BN_DIGITS = ['০', '১', '২', '৩', '৪', '৫', '৬', '৭', '৮', '৯'];
 const BN_MONTHS = ['জানুয়ারি', 'ফেব্রুয়ারি', 'মার্চ', 'এপ্রিল', 'মে', 'জুন', 'জুলাই', 'আগস্ট', 'সেপ্টেম্বর', 'অক্টোবর', 'নভেম্বর', 'ডিসেম্বর'];
@@ -103,11 +136,14 @@ window.setLanguage = function(next) {
   applyStaticText();
   renderWeatherLocationSelectors();
   if (weatherForecastData && selectedWeatherLocation) renderWeatherForecast(weatherForecastData, selectedWeatherLocation);
+  if (currentCattleAdvisory) window.renderCattleAdvisory?.(currentCattleAdvisory);
+  window.refreshCattleReadiness?.();
   renderAll();
 };
 
 function renderAll() {
   if (currentOverview) renderOverview(currentOverview);
+  else cattleLoadingState();
   if (currentAdvice) {
     renderPlannerResults(currentAdvice);
     renderComparisonGrid(currentAdvice);
@@ -129,19 +165,62 @@ function renderAll() {
 // Navigation and Screen Switching
 // ---------------------------------------------------------------------------
 
-window.switchScreen = function(screenId) {
+// Which screens each role can open. This only controls what the interface shows; it is not security.
+// Protected API routes must enforce authorisation on the server.
+const ROLES = {
+  visitor: { home: 'screen-overview', screens: ['screen-overview', 'screen-weather'] },
+  farmer: { home: 'screen-farmer', screens: ['screen-farmer', 'screen-planner', 'screen-companion'] },
+  officer: {
+    home: 'screen-officer',
+    screens: ['screen-overview', 'screen-planner', 'screen-comparison', 'screen-evidence', 'screen-ipm', 'screen-officer', 'screen-delivery', 'screen-quality', 'screen-cattle'],
+  },
+};
+const ROLE_KEY = 'eden.role';
+const FARMER_KEY = 'eden.farmer';
+
+/** Show only the navigation and controls marked data-roles for this role (null = entry screen). */
+function applyRole(role) {
+  activeRole = role;
+  document.body.classList.toggle('state-entry', !role);
+  document.body.classList.toggle('weather-only', false);
+  document.body.dataset.role = role || '';
+  document.querySelectorAll('[data-roles]').forEach(el => {
+    el.hidden = !role || !el.dataset.roles.split(' ').includes(role);
+  });
+  renderProfile();
+  if (currentOverview) renderCattleLive();
+  if (role === 'officer' && cattleCardLive.status === 'idle' && currentOverview) loadCattleCardLive();
+}
+
+function enterPortal(role) {
+  applyRole(role);
+  try { sessionStorage.setItem(ROLE_KEY, role); } catch {}
+  window.switchScreen(ROLES[role].home);
+}
+
+window.goHome = function() {
+  if (activeRole) window.switchScreen(ROLES[activeRole].home);
+};
+
+window.switchScreen = function(requested) {
+  if (!activeRole) return;
+  const screenId = ROLES[activeRole].screens.includes(requested) ? requested : ROLES[activeRole].home;
+  // A visitor reads weather through the farmer screen's weather panel, with the farmer-only tabs hidden.
+  const weatherOnly = screenId === 'screen-weather';
+  document.body.classList.toggle('weather-only', weatherOnly);
+
   document.querySelectorAll('.screen-section').forEach(sec => sec.classList.remove('active'));
-  document.querySelectorAll('.nav-tab').forEach(tab => tab.classList.remove('active'));
-  document.querySelectorAll('.mobile-nav-item').forEach(item => item.classList.remove('active'));
+  $(weatherOnly ? 'screen-farmer' : screenId)?.classList.add('active');
+  document.querySelectorAll('.nav-tab[data-screen], .mobile-nav-item[data-screen]').forEach(item => {
+    item.classList.toggle('active', item.dataset.screen === screenId);
+  });
+  if (weatherOnly) window.switchFarmerTab('weather');
 
-  $(screenId)?.classList.add('active');
-  document.querySelector(`[data-screen="${screenId}"]`)?.classList.add('active');
-
-  // Match mobile bottom nav
-  if (screenId === 'screen-overview') $('mob-nav-overview')?.classList.add('active');
-  else if (screenId === 'screen-planner') $('mob-nav-planner')?.classList.add('active');
-  else if (screenId === 'screen-farmer') $('mob-nav-farmer')?.classList.add('active');
-  else if (screenId === 'screen-officer') $('mob-nav-officer')?.classList.add('active');
+  if (screenId === 'screen-cattle') {
+    setTimeout(() => {
+      window.initCattleScreen?.();
+    }, 100);
+  }
 
   window.scrollTo({ top: 0, behavior: 'smooth' });
 };
@@ -229,14 +308,17 @@ const FALLBACK_OVERVIEW = {
 
 async function loadOverview() {
   try {
-    const res = await fetch('/api/v1/overview');
+    const res = await api('/api/v1/overview');
     if (!res.ok) throw new Error('HTTP ' + res.status);
     currentOverview = await res.json();
+    renderOverview(currentOverview);
+    return true;
   } catch (err) {
     console.warn('Overview API unavailable, using offline research baseline:', err);
     if (!currentOverview) currentOverview = FALLBACK_OVERVIEW;
+    renderOverview(currentOverview);
+    return false;
   }
-  renderOverview(currentOverview);
 }
 
 
@@ -329,6 +411,7 @@ function renderOverview(data) {
   setHtml('overviewPestReports', pestReportsHtml(data.pest_reports || data.fieldPestReports || []));
   if (data.early_warnings) renderWarnings(data.early_warnings, data.aman_replay);
   else if (data.earlyWarnings) renderWarnings(data.earlyWarnings, data.amanReplay);
+  else renderCattleCard(null);
 }
 
 function pestReportsHtml(reports) {
@@ -368,15 +451,162 @@ function renderWarnings(w, amanReplay) {
       <li><strong>ব্রি ধান৪৯:</strong> রাতের গড় ${num(n.dhan49.mean1991to2005.toFixed(1))}°C থেকে ${num(n.dhan49.mean2011to2025.toFixed(1))}°C; প্রতি দশকে +${num(n.dhan49.trendPerDecade)}°C।</li>
     `);
   }
-  const c = w.cattleStress;
-  if (c) {
-    const danger = c.months.filter(m => m.dangerShare > 0.3).length;
-    setText('cattleBadge', tr(`${num(danger)}টি বিপজ্জনক মাস`, `${danger} danger months`));
+  renderCattleCard(w.cattleHeat);
+}
+
+// The API supplies `cattleHeat`, never the `cattleStress` this card used to read, so it stayed blank.
+
+// ---- Dashboard cattle card ---------------------------------------------------------------------------------------
+// Static part: the release's Tanore THI climatology (w.cattleHeat). Live part (officers only): the latest advisory of a
+// saved farm AOI from /api/v1/cattle/aois. Nothing here is a trained prediction.
+const CATTLE_ADVISORY_STALE_HOURS = 6;
+let cattleCardLive = { status: 'idle' }; // idle | loading | ready | no_aoi | no_advisory | error
+
+function cattleLoadingState() {
+  const badge = $('cattleBadge');
+  if (badge) badge.className = 'badge badge-neutral';
+  setText('cattleBadge', tr('লোড হচ্ছে', 'Loading'));
+  setText('cattleLead', tr('তানোরের গবাদিপশুর তাপ চাপের তথ্য লোড হচ্ছে…', 'Loading cattle heat-stress data for Tanore…'));
+}
+
+function renderCattleCard(heat) {
+  const badge = $('cattleBadge');
+  const months = Array.isArray(heat?.months) ? heat.months : [];
+  if (!months.length) {
+    if (badge) badge.className = 'badge badge-neutral';
+    setText('cattleBadge', tr('উপলব্ধ নয়', 'Unavailable'));
     setText('cattleLead', tr(
-      'তানোরে গরমের দিনে গরু-মহিষের তাপীয় চাপ বেশি থাকে। পর্যাপ্ত ছায়া ও পানি নিশ্চিত করুন।',
-      'High thermal heat stress affects cattle in Tanore during peak hot months.'
+      'এই রিলিজে তানোরের গবাদিপশুর তাপ চাপের ঐতিহাসিক তথ্য নেই। সার্ভার থেকে তথ্য পাওয়া গেলে এখানে দেখাবে।',
+      'This data release has no historical cattle heat-stress data for Tanore. It will appear here once the server supplies it.'
     ));
+    setHtml('cattleChart', '');
+    setHtml('cattleFacts', '');
+  } else {
+    const monthName = (m) => tr(BN_MONTHS[m - 1], EN_MONTHS[m - 1]);
+    const pct = (share) => `${num(Math.round(share * 100))}%`;
+    const peak = months.find(m => m.month === heat.peakMonth) || months[0];
+    const hot = months.filter(m => m.dangerShare >= 0.5).map(m => monthName(m.month));
+    if (badge) badge.className = 'badge badge-info';
+    setText('cattleBadge', tr('ঐতিহাসিক ধরন', 'Historical pattern'));
+    setText('cattleLead', hot.length
+      ? tr(
+        `তানোরে ${hot.join(', ')} মাসে অর্ধেকের বেশি ঘণ্টা THI বিপদসীমায় বা তার ওপরে থাকে। সবচেয়ে বেশি ${monthName(peak.month)} (${pct(peak.dangerShare)})। এই সময়গুলোর আগে ছায়া ও পানির ব্যবস্থা ঠিক রাখুন।`,
+        `In Tanore, more than half of all hours are at or above the THI danger band in ${hot.join(', ')}. The peak is ${monthName(peak.month)} (${pct(peak.dangerShare)}). Plan shade and water ahead of these months.`)
+      : tr(
+        `২০২৩–২০২৫ সালের তথ্যে কোনো মাসে অর্ধেকের বেশি ঘণ্টা THI বিপদসীমায় পৌঁছায়নি। সর্বোচ্চ ${monthName(peak.month)} (${pct(peak.dangerShare)})।`,
+        `In the 2023–2025 data no month had more than half its hours in the THI danger band. Peak: ${monthName(peak.month)} (${pct(peak.dangerShare)}).`));
+    const summary = tr(
+      `মাসভিত্তিক বিপদসীমা বা তার ওপরে THI-র ঘণ্টার অংশ: ${months.map(m => `${monthName(m.month)} ${pct(m.dangerShare)}`).join(', ')}।`,
+      `Share of hours at or above the THI danger band, by month: ${months.map(m => `${monthName(m.month)} ${pct(m.dangerShare)}`).join(', ')}.`);
+    $('cattleChart')?.setAttribute('aria-label', summary);
+    setHtml('cattleChart', months.map(m => `
+      <div class="cattle-bar" title="${escapeHtml(`${monthName(m.month)}: ${pct(m.dangerShare)}`)}">
+        <span class="cattle-bar-fill ${m.dangerShare >= 0.5 ? 'is-high' : ''}" style="height: ${Math.round(m.dangerShare * 100)}%"></span>
+        <span class="cattle-bar-label" aria-hidden="true">${escapeHtml(lang === 'en' ? EN_MONTHS[m.month - 1] : num(m.month))}</span>
+      </div>`).join(''));
+    const noRelief = (heat.noReliefMonths || []).map(monthName);
+    const coolest = (peak.coolestHours || []).join(', ');
+    const facts = [
+      coolest
+        ? tr(`${monthName(peak.month)} মাসে সবচেয়ে ঠান্ডা ঘণ্টা: ${num(coolest)}। খাওয়ানো ও কাজ এই সময়ে সরানো যায়।`, `Coolest hours in ${monthName(peak.month)}: ${coolest}. Feeding and work can be shifted to these hours.`)
+        : tr(`${monthName(peak.month)} মাসের ঠান্ডা ঘণ্টার তথ্য নেই।`, `No coolest-hours data for ${monthName(peak.month)}.`),
+    ];
+    if (noRelief.length) facts.push(tr(`${noRelief.join(', ')}: প্রায় প্রতি রাতেই কোনো স্বস্তি ছিল না (ঐতিহাসিক রাতের হিসাব)।`, `${noRelief.join(', ')}: nearly every night gave no relief (historical night count).`));
+    const source = String(heat.source || '').split(';')[0];
+    facts.push(tr(
+      `উৎস: ${source}। মাত্র ৩ বছরের তথ্য: দীর্ঘমেয়াদি জলবায়ু নয়, আজকের পূর্বাভাসও নয়।`,
+      `Source: ${source}. Only three years of data: not a long-term climatology and not today's forecast.`));
+    setHtml('cattleFacts', facts.map(f => `<li>${escapeHtml(f)}</li>`).join(''));
   }
+  renderCattleLive();
+  if (activeRole === 'officer' && cattleCardLive.status === 'idle') loadCattleCardLive();
+}
+
+async function loadCattleCardLive() {
+  if (cattleCardLive.status === 'loading') return;
+  cattleCardLive = { status: 'loading' };
+  renderCattleLive();
+  try {
+    const { aois = [] } = await apiJson('/api/v1/cattle/aois');
+    if (!aois.length) {
+      cattleCardLive = { status: 'no_aoi' };
+    } else {
+      const aoi = (selectedCattleAoi && aois.find(a => a.aoiId === selectedCattleAoi.aoiId)) || aois[0];
+      try {
+        const { advisory } = await apiJson(`/api/v1/cattle/aois/${encodeURIComponent(aoi.aoiId)}/advisory`);
+        cattleCardLive = { status: 'ready', aoi, adv: advisory };
+      } catch (err) {
+        cattleCardLive = err.kind === 'no_data' ? { status: 'no_advisory', aoi } : { status: 'error', err };
+      }
+    }
+  } catch (err) {
+    cattleCardLive = { status: 'error', err };
+  }
+  renderCattleLive();
+}
+
+window.reloadCattleCard = function() {
+  cattleCardLive = { status: 'idle' };
+  loadCattleCardLive();
+};
+
+function renderCattleLive() {
+  const box = $('cattleLive');
+  if (!box) return;
+  const s = cattleCardLive;
+  const head = `<h4>${escapeHtml(tr('খামারভিত্তিক পরামর্শ', 'Farm-specific advisory'))}</h4>`;
+  const note = (bn, en) => `<p class="small muted">${escapeHtml(tr(bn, en))}</p>`;
+  if (activeRole !== 'officer') {
+    box.innerHTML = head + note('খামারভিত্তিক পরামর্শ শুধু কর্মকর্তার জন্য। এখানে শুধু তানোরের ঐতিহাসিক ধরন দেখানো হয়েছে।', 'Farm-specific advice is for officers. Only the historical Tanore pattern is shown here.');
+  } else if (s.status === 'idle' || s.status === 'loading') {
+    box.innerHTML = head + note('সংরক্ষিত খামারের সর্বশেষ পরামর্শ খোঁজা হচ্ছে…', 'Checking the latest advisory for a saved farm…');
+  } else if (s.status === 'no_aoi') {
+    box.innerHTML = head + note('কোনো খামারের সীমানা (AOI) সংরক্ষিত নেই, তাই খামারভিত্তিক পরামর্শ দেখানো যাচ্ছে না। নিচের বোতামে গিয়ে খামার আঁকুন বা GeoJSON আপলোড করুন।', 'No farm boundary (AOI) is saved, so no farm-specific advisory can be shown. Use the button below to draw a farm or upload GeoJSON.');
+  } else if (s.status === 'no_advisory') {
+    box.innerHTML = head + note(`“${s.aoi.farmLabel}” খামারের জন্য এখনও কোনো পরামর্শ তৈরি হয়নি। নিচের বোতামে গিয়ে “রিফ্রেশ ও বিশ্লেষণ চালান” চাপুন।`, `No advisory has been produced yet for “${s.aoi.farmLabel}”. Use the button below and press “Run refresh & analysis”.`);
+  } else if (s.status === 'error') {
+    box.innerHTML = head + note('খামারের পরামর্শ লোড করা যায়নি। ' + failureText(s.err), 'Could not load the farm advisory. ' + failureText(s.err))
+      + `<button class="btn btn-sm btn-outline" type="button" onclick="reloadCattleCard()">${escapeHtml(tr('আবার চেষ্টা করুন', 'Retry'))}</button>`;
+  } else {
+    box.innerHTML = head + cattleLiveReadyHtml(s.aoi, s.adv);
+  }
+}
+
+function cattleLiveReadyHtml(aoi, adv) {
+  const thi = adv.derived.thi;
+  const heur = adv.heuristic;
+  const forage = adv.forageStatus;
+  const [cls, bn, en] = THI_BADGE[thi.category] || ['badge-neutral', thi.category, thi.category];
+  const generated = new Date(adv.generatedAt);
+  const stale = (Date.now() - generated.getTime()) / 3600000 > CATTLE_ADVISORY_STALE_HOURS;
+  const when = generated.toLocaleString(lang === 'en' ? 'en-GB' : 'bn-BD');
+  const provider = adv.measured?.forecast?.source?.provider || 'Open-Meteo';
+  const cool = thi.lowestThiHours?.length ? thi.lowestThiHours.map(h => num(h)).join(', ') : tr('উপাত্ত নেই', 'no data');
+  const water = lang === 'en' ? heur.waterDemand.labelEnglish : heur.waterDemand.labelBangla;
+  const grazing = lang === 'en' ? heur.grazing.rationaleEnglish : heur.grazing.rationaleBangla;
+  const bullets = (lang === 'en' ? heur.bulletsEnglish : heur.bulletsBangla) || [];
+  const obs = forage.observationDate ? `, ${isoDate(forage.observationDate)}` : '';
+  const greenness = forage.ndviProxy !== null
+    ? tr(`${num(forage.ndviProxy.toFixed(2))} (MODIS ৫০০ মি.${obs}) — শুধু সবুজতা, ঘাসের পরিমাণ নয়`, `${forage.ndviProxy.toFixed(2)} (MODIS 500 m${obs}) — greenness only, not forage biomass`)
+    : tr('উপলব্ধ নয় (Earth Engine থেকে মান আসেনি); ঘাসের অবস্থা বলা যাচ্ছে না', 'Unavailable (no Earth Engine value); forage condition cannot be stated');
+  const unavailable = (adv.modelStatus?.unavailablePredictions || [])
+    .map(p => `${lang === 'en' ? p.targetLabelEnglish : p.targetLabelBangla}: ${lang === 'en' ? p.reasonEnglish : p.reasonBangla}`);
+  if (!unavailable.length) unavailable.push(tr('দুধ কমা ও রোগের ঝুঁকির পূর্বাভাস: যাচাইকৃত লেবেলযুক্ত উপাত্ত নেই, তাই উপলব্ধ নয়।', 'Milk-loss and disease-risk prediction: unavailable; no validated labelled data.'));
+  const li = (label, value) => `<li><strong>${escapeHtml(label)}:</strong> ${escapeHtml(value)}</li>`;
+  const staleText = tr(` — ${num(CATTLE_ADVISORY_STALE_HOURS)} ঘণ্টার বেশি পুরনো; অবস্থা বদলে থাকতে পারে। পর্দা খুলে রিফ্রেশ করুন।`, ` — older than ${CATTLE_ADVISORY_STALE_HOURS} hours; conditions may have changed. Open the screen and refresh.`);
+  return `
+    <p class="small"><strong>${escapeHtml(aoi.farmLabel)}</strong>${aoi.demo ? ` <span class="badge badge-neutral">${escapeHtml(tr('ডেমো খামার', 'Demo farm'))}</span>` : ''}</p>
+    <p class="small">${escapeHtml(tr('তাপ চাপ সূচক (THI)', 'Heat-stress index (THI)'))}: <strong>${num(thi.current)}</strong> <span class="badge ${cls}">${escapeHtml(tr(bn, en))}</span></p>
+    <ul class="warning-list">
+      ${li(tr('গণনা', 'Computed'), tr(`THI NRC (1971) সূত্রে, ${provider} আবহাওয়া মডেলের অনুমান থেকে`, `THI by the NRC (1971) formula from ${provider} weather-model estimates`))}
+      ${li(tr('ঠান্ডা ঘণ্টা (পূর্বাভাস)', 'Cooler hours (forecast)'), cool)}
+      ${li(tr('চারণ (নিয়মভিত্তিক অনুমান)', 'Grazing (rule-based heuristic)'), grazing)}
+      ${li(tr('পানির চাহিদা (শ্রেণি, লিটার নয়)', 'Water demand (category, not litres)'), water)}
+      ${li(tr('সবুজতা', 'Greenness'), greenness)}
+    </ul>
+    ${bullets.length ? `<ul class="warning-list">${bullets.map(b => `<li>${escapeHtml(b)}</li>`).join('')}</ul>` : ''}
+    <p class="small muted">${escapeHtml(tr('উপলব্ধ নয়', 'Unavailable'))}: ${escapeHtml(unavailable.join(' · '))}</p>
+    <p class="small ${stale ? 'cattle-stale' : 'muted'}">${escapeHtml(tr(`তৈরি: ${when}`, `Generated: ${when}`))}${stale ? escapeHtml(staleText) : ''}</p>`;
 }
 
 window.promptBlockChange = function() {
@@ -391,16 +621,22 @@ window.promptBlockChange = function() {
 window.triggerManualSync = async function() {
   const btn = $('sync-trigger');
   if (btn) btn.style.transform = 'rotate(360deg)';
-  await loadOverview();
+  const ok = await loadOverview();
   if (btn) setTimeout(() => { btn.style.transform = 'none'; }, 700);
-  showToast('cycle-select-toast', tr('নাসা স্যাটেলাইট ও বিএমডি ডাটা সিঙ্ক সম্পন্ন!', 'NASA satellite & BMD ground data synced!'));
+  // Only re-reads the server's current release; there is no endpoint that fetches NASA/BMD data on demand.
+  showToast('cycle-select-toast', ok
+    ? tr('সার্ভারের সর্বশেষ ডেটা রিলিজ পুনরায় লোড হয়েছে। নাসা/বিএমডি থেকে নতুন ডেটা আনা হয়নি।', 'Reloaded the latest data release from the server. No new NASA/BMD data was fetched.')
+    : tr('সার্ভারে সংযোগ করা যায়নি; অফলাইন ডেটা দেখানো হচ্ছে। কিছুই সিঙ্ক হয়নি।', 'Could not reach the server; showing offline data. Nothing was synced.'));
 };
 
+// Demo-only: there is no notice-sending endpoint, so nothing is stored or sent.
 window.approveNotice = function() {
-  setText('kpiNotice', tr('অনুমোদিত ও প্রেরিত', 'Approved & dispatched'));
-  showToast('dispatch-toast', tr('১১৪ জন কৃষকের কাছে আমন কর্তন সংক্রান্ত নোটিশ পাঠানো হয়েছে!', 'Harvest notice dispatched to 114 farmers!'));
+  setText('dispatchToastTitle', tr('ডেমো অনুমোদন', 'Demo approval'));
+  showToast('dispatch-toast', tr(
+    'এটি শুধু ডেমো। কোনো এসএমএস বা নোটিশ কৃষকের কাছে পাঠানো হয়নি এবং অনুমোদন সংরক্ষিত হয়নি।',
+    'Demo only. No SMS or notice was sent to any farmer and the approval was not saved.'
+  ), 5000);
 };
-
 // ---------------------------------------------------------------------------
 // SCREEN 2: Crop Rotation Planner
 // ---------------------------------------------------------------------------
@@ -442,7 +678,7 @@ window.setPriorityPill = function(priority) {
 window.runPlannerCalculation = async function(options = {}) {
   const weight = (id) => ($(id) ? parseFloat($(id).value) / 100 : 0.25);
   try {
-    const res = await fetch('/api/v1/advice', {
+    const res = await api('/api/v1/advice', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -700,7 +936,7 @@ function renderIpm(advice) {
 
 async function loadOfficers() {
   try {
-    officers = await (await fetch('/api/v1/officers')).json();
+    officers = await (await api('/api/v1/officers')).json();
     setHtml('officerSelect', officers.map(o => `<option value="${o.id}">${escapeHtml(tr(o.nameBangla, o.nameEnglish))} (${escapeHtml(tr(o.blockBangla, o.blockEnglish))})</option>`).join(''));
   } catch (err) {
     console.error('Failed to load officers:', err);
@@ -710,7 +946,7 @@ async function loadOfficers() {
 async function loadOfficerDesk() {
   if (!officerSession?.token) return;
   try {
-    const res = await fetch('/api/v1/officer/desk', {
+    const res = await api('/api/v1/officer/desk', {
       headers: { Authorization: `Bearer ${officerSession.token}` },
     });
     if (!res.ok) {
@@ -724,41 +960,83 @@ async function loadOfficerDesk() {
   }
 }
 
+function setEntryError(id, message) {
+  const box = $(id);
+  if (!box) return;
+  box.textContent = message || '';
+  box.hidden = !message;
+}
+
+function setEntryBusy(buttonId, busy) {
+  const btn = $(buttonId);
+  if (btn) btn.disabled = busy;
+}
+
 window.officerSignIn = async function(e) {
   e?.preventDefault();
   const officerId = $('officerSelect').value;
   const accessCode = $('officerCode').value;
-  const res = await fetch('/api/v1/officer/login', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ officerId, accessCode }),
-  });
-  const data = await res.json();
-  if (res.ok) {
+  setEntryError('officerLoginError', '');
+  if (!officerId) {
+    setEntryError('officerLoginError', tr('কর্মকর্তার তালিকা লোড হয়নি। সার্ভার চালু আছে কি না দেখুন।', 'The officer list did not load. Check that the server is running.'));
+    loadOfficers();
+    return;
+  }
+  setEntryBusy('entryOfficerBtn', true);
+  try {
+    const res = await api('/api/v1/officer/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ officerId, accessCode }),
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok || !data?.token) {
+      setEntryError('officerLoginError', tr('কর্মকর্তা বা প্রবেশ কোড সঠিক নয়।', 'The officer or access code is not correct.'));
+      return;
+    }
     officerSession = data;
     currentUser = { id: data.officer.id, role: 'officer', nameBangla: data.officer.nameBangla, blockBangla: data.officer.blockBangla };
     try { sessionStorage.setItem('eden.officer', JSON.stringify(data)); } catch {}
     await loadOfficerDesk();
-    renderProfile();
-    window.switchScreen('screen-officer');
-  } else {
-    setText('officerLoginError', tr('ভুল কোড! ডেমো কোড: talanda-demo', 'Incorrect code! Demo code: talanda-demo'));
-    $('officerLoginError').hidden = false;
+    if (!officerSession) {
+      setEntryError('officerLoginError', tr('সেশন শুরু করা যায়নি। আবার চেষ্টা করুন।', 'Could not start the session. Please try again.'));
+      return;
+    }
+    $('officerCode').value = '';
+    enterPortal('officer');
+  } catch {
+    setEntryError('officerLoginError', tr('সার্ভারে পৌঁছানো যায়নি। আবার চেষ্টা করুন।', 'Could not reach the server. Please try again.'));
+  } finally {
+    setEntryBusy('entryOfficerBtn', false);
   }
 };
 
-window.officerSignOut = function() {
+/** End the current role (and its demo session, if any) and return to the role chooser. */
+window.signOutRole = function() {
+  const token = authToken || officerSession?.token;
+  if (token) api('/api/v1/auth/logout', { method: 'POST', headers: { Authorization: `Bearer ${token}` } }).catch(() => {});
   officerSession = null;
+  officerDesk = null;
   currentUser = null;
   authToken = null;
-  try { sessionStorage.removeItem('eden.officer'); } catch {}
-  renderProfile();
+  try {
+    sessionStorage.removeItem('eden.officer');
+    sessionStorage.removeItem(FARMER_KEY);
+    sessionStorage.removeItem(ROLE_KEY);
+  } catch {}
+  window.closeRoleModal();
+  applyRole(null);
   renderOfficer();
+  if ($('officerCode')) $('officerCode').value = '';
+  window.showEntryStep('choose');
+  window.scrollTo({ top: 0 });
 };
+window.switchRole = window.signOutRole;
+window.officerSignOut = window.signOutRole;
 
 window.officerReset = async function() {
   if (!officerSession?.token) return;
-  await fetch('/api/v1/officer/reset', {
+  await api('/api/v1/officer/reset', {
     method: 'POST',
     headers: { Authorization: `Bearer ${officerSession.token}` },
   });
@@ -767,9 +1045,34 @@ window.officerReset = async function() {
 
 function renderProfile() {
   const o = officerSession?.officer;
-  setText('saaoName', o ? tr(o.nameBangla, o.nameEnglish) : currentUser ? currentUser.nameBangla : tr('নমুনা কর্মকর্তা', 'Sample officer'));
-  setText('saaoRole', o ? tr(`SAAO, ${o.blockBangla}`, `SAAO, ${o.blockEnglish}`) : currentUser?.role === 'farmer' ? tr('নিবন্ধিত কৃষক (Farmer)', 'Registered Farmer') : tr('SAAO, তালন্দ ব্লক', 'SAAO, Talanda block'));
-  setText('userAvatarDot', o ? 'উপ' : currentUser?.role === 'farmer' ? 'কৃ' : 'উপ');
+  let name = '';
+  let role = '';
+  let avatar = '';
+  let note = '';
+  if (activeRole === 'visitor') {
+    name = tr('দর্শনার্থী', 'Visitor');
+    role = tr('সাইন-ইন ছাড়া · শুধু পড়া', 'Not signed in · read-only');
+    avatar = tr('দ', 'V');
+    note = tr('আপনি সাইন-ইন ছাড়া শুধু খোলা পাতা দেখছেন।', 'You are viewing public pages only, without signing in.');
+  } else if (activeRole === 'farmer') {
+    name = currentUser?.nameBangla ? tr(currentUser.nameBangla, currentUser.nameEnglish || currentUser.nameBangla) : tr('নমুনা কৃষক', 'Sample farmer');
+    role = tr('কৃষক · ডেমো সেশন', 'Farmer · demo session');
+    avatar = tr('কৃ', 'F');
+    note = tr('ডেমো সেশন: এসএমএস বা ওটিপি দিয়ে যাচাই হয়নি।', 'Demo session: not verified by SMS or OTP.');
+  } else if (activeRole === 'officer') {
+    name = o ? tr(o.nameBangla, o.nameEnglish || o.nameBangla) : tr('কর্মকর্তা', 'Officer');
+    role = o ? tr(`SAAO, ${o.blockBangla} · ডেমো`, `SAAO, ${o.blockEnglish || o.blockBangla} · demo`) : tr('SAAO · ডেমো', 'SAAO · demo');
+    avatar = tr('কর্', 'O');
+    note = tr('ডেমো প্রবেশ: এটি আসল বা নিরাপদ লগইন নয়।', 'Demo access: not a real or secure login.');
+  }
+  setText('saaoName', name);
+  setText('saaoRole', role);
+  setText('userAvatarDot', avatar);
+  setText('accountName', name);
+  setText('accountRole', role);
+  setText('accountAvatar', avatar);
+  setText('accountNote', note);
+  if ($('accountSignOutBtn')) $('accountSignOutBtn').hidden = activeRole === 'visitor';
 }
 
 function renderOfficer() {
@@ -862,18 +1165,19 @@ window.updateCharCount = function(text) {
 window.toggleSealLabel = function(isSealed) {};
 
 window.rescheduleVisit = function() {
-  showToast('cycle-select-toast', tr('ফিল্ড ভিজিট আগামী ৩ দিনের মধ্যে পুনরায় শিডিউল করা হয়েছে।', 'Field visit rescheduled for the next 3 days.'));
+  showToast('cycle-select-toast', tr('ডেমো: শিডিউল সংরক্ষিত হয়নি এবং কৃষককে জানানো হয়নি।', 'Demo only: the new schedule was not saved and the farmer was not notified.'));
 };
 
 window.markVisited = function() {
-  showToast('cycle-select-toast', tr('মাঠ পরিদর্শন সম্পন্ন হিসেবে চিহ্নিত করা হয়েছে ✓', 'Field visit marked as completed ✓'));
+  showToast('cycle-select-toast', tr('ডেমো: ভিজিট সম্পন্ন হিসেবে সংরক্ষিত হয়নি।', 'Demo only: the visit was not recorded as completed.'));
 };
 
 window.dispatchFieldAdvice = async function() {
   const notes = $('fcAdvisoryNotes')?.value || 'মাঠ পরিদর্শন পরামর্শ প্রেরিত';
+  let saved = false;
   if (officerSession?.token) {
     try {
-      await fetch('/api/v1/officer/observations', {
+      const res = await api('/api/v1/officer/observations', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${officerSession.token}` },
         body: JSON.stringify({
@@ -887,10 +1191,15 @@ window.dispatchFieldAdvice = async function() {
           resolveCallbacks: true,
         }),
       });
-      await loadOfficerDesk();
-    } catch {}
+      saved = res.ok;
+      if (saved) await loadOfficerDesk();
+    } catch { /* offline: reported below as not saved */ }
   }
-  showToast('dispatch-toast', tr('মোঃ রফিকুল ইসলামের (০১৭১৭-***২৩৩) ফোনে পরামর্শ সফলভাবে পাঠানো হয়েছে!', 'Advice SMS successfully dispatched to Md. Rafiqul Islam!'));
+  // No SMS or app push exists yet (docs/api-contract.md): say what really happened.
+  setText('dispatchToastTitle', saved ? tr('পরামর্শ সংরক্ষিত হয়েছে', 'Advice saved') : tr('পরামর্শ সংরক্ষিত হয়নি', 'Advice not saved'));
+  showToast('dispatch-toast', saved
+    ? tr('অফিসার ডেস্কে সংরক্ষিত হয়েছে। কোনো এসএমএস পাঠানো হয়নি — এসএমএস সেবা এখনো সংযুক্ত নয়।', 'Saved to the officer desk. No SMS was sent: SMS delivery is not connected yet.')
+    : tr('সংরক্ষণ করা যায়নি (কর্মকর্তা হিসেবে সাইন-ইন করুন বা আবার চেষ্টা করুন)। কোনো এসএমএস পাঠানো হয়নি।', 'Not saved (sign in as an officer or try again). No SMS was sent.'));
 };
 
 window.submitObservation = async function(e) {
@@ -912,7 +1221,7 @@ window.submitObservation = async function(e) {
       pest: parseFloat($('obsPestPriority').value) / 100,
     },
   };
-  const res = await fetch('/api/v1/officer/observations', {
+  const res = await api('/api/v1/officer/observations', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${officerSession.token}` },
     body: JSON.stringify(body),
@@ -938,10 +1247,9 @@ window.switchFarmerTab = function(tab) {
   else if (tab === 'erosion') fetchRiverErosion('jamuna');
 };
 
-const weatherLocationName = (location) => tr(
-  `${location.upazilaBn}, ${location.districtBn}`,
-  `${location.upazilaEn}, ${location.districtEn}`,
-);
+const weatherLocationName = (location) => location.source === 'gps'
+  ? tr(`আপনার বর্তমান অবস্থান (${location.lat.toFixed(2)}, ${location.lon.toFixed(2)})`, `Your current location (${location.lat.toFixed(2)}, ${location.lon.toFixed(2)})`)
+  : tr(`${location.upazilaBn}, ${location.districtBn}`, `${location.upazilaEn}, ${location.districtEn}`);
 
 function renderWeatherLocationSelectors() {
   const districtSelect = $('weatherDistrictSelect');
@@ -962,7 +1270,7 @@ function renderWeatherLocationSelectors() {
   const districts = [...districtMap.values()].sort(sortLocalName);
   const savedDistrict = districts.some(d => d.id === previousDistrict)
     ? previousDistrict
-    : selectedWeatherLocation?.districtId || districts.find(d => d.en === 'Rajshahi')?.id || districts[0]?.id;
+    : selectedWeatherLocation?.districtId || districts[0]?.id; // no pilot-site default: nothing loads until an upazila is chosen
   districtSelect.innerHTML = districts.map(d => `<option value="${escapeHtml(d.id)}">${escapeHtml(tr(d.bn, d.en))}</option>`).join('');
   districtSelect.value = savedDistrict;
   districtSelect.disabled = false;
@@ -979,57 +1287,134 @@ function renderWeatherLocationSelectors() {
   upazilaSelect.disabled = false;
 }
 
+const WEATHER_STORAGE_KEY = 'eden.weather.location';
+const saveWeatherChoice = (value) => { try { value ? localStorage.setItem(WEATHER_STORAGE_KEY, JSON.stringify(value)) : localStorage.removeItem(WEATHER_STORAGE_KEY); } catch { /* storage unavailable */ } };
+const readWeatherChoice = () => {
+  try {
+    const raw = localStorage.getItem(WEATHER_STORAGE_KEY);
+    if (!raw) return null;
+    return raw.startsWith('{') ? JSON.parse(raw) : { type: 'upazila', id: raw }; // older versions stored just the id
+  } catch { return null; }
+};
+
+/** Flatten the API's district -> upazila hierarchy into the list the selectors use. */
+function flattenLocations(payload) {
+  return (payload?.districts || []).flatMap(d => d.upazilas.map(u => ({
+    id: u.id, districtId: d.id, districtBn: d.nameBn, districtEn: d.nameEn,
+    upazilaBn: u.nameBn, upazilaEn: u.nameEn, lat: u.lat, lon: u.lon, approximate: u.approximate,
+  })));
+}
+
+function showWeatherStatus(kind, bn, en, retry = false) {
+  const box = $('weatherStatusBox');
+  if (!box) return;
+  box.hidden = !bn;
+  box.className = `weather-status weather-status-${kind}`;
+  setText('weatherStatusText', bn ? tr(bn, en) : '');
+  const btn = $('weatherRetryBtn');
+  if (btn) btn.hidden = !retry;
+}
+
+function clearWeatherView() {
+  weatherForecastData = null;
+  weatherNasaData = null;
+  setText('fwTemp', '—');
+  setText('fwHumidity', '—');
+  setText('fwRain', '—');
+  setHtml('weatherForecastList', '');
+  setHtml('weatherHourlyThi', '');
+  setHtml('weatherNasaBox', '');
+  setText('weatherSourceNote', '');
+}
+
 async function initializeWeatherLocations() {
   const districtSelect = $('weatherDistrictSelect');
   const upazilaSelect = $('weatherUpazilaSelect');
   if (!districtSelect || !upazilaSelect) return;
 
   try {
-    const response = await fetch('/data/bangladesh-upazilas.json');
-    if (!response.ok) throw new Error(`Location list request failed: ${response.status}`);
-    const data = await response.json();
-    weatherLocations = Array.isArray(data.locations) ? data.locations : [];
-    if (!weatherLocations.length) throw new Error('Location list is empty');
+    const payload = await apiJson('/api/v1/locations');
+    weatherLocations = flattenLocations(payload);
+    if (!weatherLocations.length) throw new ApiFailure('no_data', 'Location list is empty');
 
-    let savedId = '';
-    try { savedId = localStorage.getItem('eden.weather.location') || ''; } catch {}
-    selectedWeatherLocation = weatherLocations.find(location => location.id === savedId)
-      || weatherLocations.find(location => location.districtEn === 'Rajshahi' && location.upazilaEn === 'Tanore')
-      || null;
+    const saved = readWeatherChoice();
+    selectedWeatherLocation = null;
+    if (saved?.type === 'gps' && Number.isFinite(saved.lat) && Number.isFinite(saved.lon)) {
+      selectedWeatherLocation = { id: `gps:${saved.lat},${saved.lon}`, source: 'gps', lat: saved.lat, lon: saved.lon };
+    } else if (saved?.id) {
+      selectedWeatherLocation = weatherLocations.find(location => location.id === saved.id) || null;
+    }
     renderWeatherLocationSelectors();
-    if (selectedWeatherLocation) {
+    if (selectedWeatherLocation && selectedWeatherLocation.source !== 'gps') {
       $('weatherDistrictSelect').value = selectedWeatherLocation.districtId;
       $('weatherUpazilaSelect').value = selectedWeatherLocation.id;
+    }
+    if (selectedWeatherLocation) {
       setText('weatherDataNotice', tr(
-        `${weatherLocationName(selectedWeatherLocation)}-এর আবহাওয়া পূর্বাভাস লোড করতে আবহাওয়া ট্যাব খুলুন।`,
+        `${weatherLocationName(selectedWeatherLocation)}-এর আবহাওয়া লোড করতে আবহাওয়া ট্যাব খুলুন।`,
         `Open the Weather tab to load the forecast for ${weatherLocationName(selectedWeatherLocation)}.`,
       ));
+    } else {
+      setText('weatherDataNotice', tr('আবহাওয়া দেখতে জেলা ও উপজেলা বেছে নিন, অথবা বর্তমান অবস্থান ব্যবহার করুন।', 'Choose a district and upazila, or use your current location.'));
     }
     districtSelect.addEventListener('change', () => {
       selectedWeatherLocation = null;
-      weatherForecastData = null;
+      clearWeatherView();
       renderWeatherLocationSelectors();
-      setText('fwTemp', '—');
-      setText('fwHumidity', '—');
-      setText('fwRain', '—');
-      setHtml('weatherForecastList', '');
+      showWeatherStatus('', '', '');
       setText('weatherDataNotice', tr('উপজেলার আবহাওয়া দেখতে তালিকা থেকে উপজেলা বেছে নিন।', 'Choose an upazila to view its weather forecast.'));
-      try { localStorage.removeItem('eden.weather.location'); } catch {}
+      saveWeatherChoice(null);
     });
     upazilaSelect.addEventListener('change', () => {
       selectedWeatherLocation = weatherLocations.find(location => location.id === upazilaSelect.value) || null;
-      weatherForecastData = null;
+      clearWeatherView();
       if (!selectedWeatherLocation) return;
-      try { localStorage.setItem('eden.weather.location', selectedWeatherLocation.id); } catch {}
+      saveWeatherChoice({ type: 'upazila', id: selectedWeatherLocation.id });
       loadWeatherForecast();
     });
   } catch (error) {
     console.error('Weather location list error:', error);
     districtSelect.disabled = true;
     upazilaSelect.disabled = true;
-    setText('weatherDataNotice', tr('বাংলাদেশের জেলা-উপজেলার তালিকা লোড করা যায়নি। আবার চেষ্টা করতে পৃষ্ঠা রিলোড করুন।', 'Could not load Bangladesh locations. Reload the page to try again.'));
+    showWeatherStatus('error', `জেলা-উপজেলার তালিকা লোড করা যায়নি। ${failureText(error)}`, `Could not load the district/upazila list. ${failureText(error)}`, true);
+    $('weatherRetryBtn')?.setAttribute('data-retry', 'locations');
   }
 }
+
+/** Browser location. Denial, unsupported browsers, timeouts and positions outside Bangladesh each get their own message. */
+window.useCurrentWeatherLocation = function() {
+  if (!('geolocation' in navigator)) {
+    showWeatherStatus('error', 'এই ব্রাউজার লোকেশন সমর্থন করে না। জেলা ও উপজেলা বেছে নিন।', 'This browser does not support location. Please choose a district and upazila.');
+    return;
+  }
+  showWeatherStatus('info', 'আপনার অবস্থান নির্ণয় করা হচ্ছে…', 'Finding your location…');
+  navigator.geolocation.getCurrentPosition((pos) => {
+    const lat = Math.round(pos.coords.latitude * 100) / 100; // ~1 km: coarse on purpose, since this value is stored on the device
+    const lon = Math.round(pos.coords.longitude * 100) / 100;
+    if (lat < 20.4 || lat > 26.8 || lon < 88.0 || lon > 92.8) {
+      showWeatherStatus('error', 'আপনার অবস্থান বাংলাদেশের বাইরে। জেলা ও উপজেলা বেছে নিন।', 'Your location is outside Bangladesh. Please choose a district and upazila.');
+      return;
+    }
+    selectedWeatherLocation = { id: `gps:${lat},${lon}`, source: 'gps', lat, lon };
+    $('weatherDistrictSelect').value = '';
+    renderWeatherLocationSelectors();
+    clearWeatherView();
+    saveWeatherChoice({ type: 'gps', lat, lon });
+    loadWeatherForecast();
+  }, (err) => {
+    if (err.code === err.PERMISSION_DENIED) showWeatherStatus('error', 'লোকেশনের অনুমতি দেওয়া হয়নি। জেলা ও উপজেলা বেছে নিন।', 'Location permission was denied. Please choose a district and upazila.');
+    else if (err.code === err.TIMEOUT) showWeatherStatus('error', 'অবস্থান নির্ণয়ে বেশি সময় লাগছে। আবার চেষ্টা করুন বা হাতে বেছে নিন।', 'Finding your location timed out. Try again or choose manually.');
+    else showWeatherStatus('error', 'অবস্থান পাওয়া যায়নি (জিপিএস বন্ধ থাকতে পারে)। হাতে বেছে নিন।', 'Your position is unavailable (GPS may be off). Please choose manually.');
+  }, { enableHighAccuracy: false, timeout: 10000, maximumAge: 300000 });
+};
+
+window.retryWeather = function() {
+  if ($('weatherRetryBtn')?.getAttribute('data-retry') === 'locations') {
+    initializeWeatherLocations();
+    return;
+  }
+  loadWeatherForecast();
+};
 
 const weatherIcon = (code) => {
   if (code === 0 || code === 1) return 'wb_sunny';
@@ -1043,6 +1428,44 @@ const weatherIcon = (code) => {
   return 'cloud';
 };
 
+/** NRC (1971) THI, same formula as the API. Computed only for hours that have BOTH temperature and humidity from the forecast. */
+const thiOf = (t, rh) => (1.8 * t + 32) - (0.55 - 0.0055 * Math.min(100, Math.max(0, rh))) * (1.8 * t - 26);
+const thiClass = (thi) => (thi < 72 ? 'normal' : thi < 79 ? 'alert' : thi < 84 ? 'danger' : 'emergency');
+
+function renderHourlyThi(forecast) {
+  const nowLocal = forecast.current.time; // zone-naive local time string
+  const hours = (forecast.hourly || []).filter(h => h.time >= nowLocal.slice(0, 13)).slice(0, 24);
+  if (!hours.length) { setHtml('weatherHourlyThi', ''); return; }
+  const usable = hours.filter(h => h.temperatureC != null && h.relativeHumidityPct != null);
+  const missing = hours.length - usable.length;
+  const pills = usable.map(h => {
+    const thi = thiOf(Number(h.temperatureC), Number(h.relativeHumidityPct));
+    return `<div class="hourly-thi-pill thi-${thiClass(thi)}">
+      <span>${num(h.time.slice(11, 16))}</span><strong>${num(thi.toFixed(0))}</strong>
+      <small>${num(Number(h.temperatureC).toFixed(0))}°C · ${num(Math.round(Number(h.relativeHumidityPct)))}%</small></div>`;
+  }).join('');
+  setHtml('weatherHourlyThi', `<h4>${escapeHtml(tr('ঘণ্টাভিত্তিক গরুর তাপ চাপ সূচক (THI)', 'Hourly cattle heat-stress index (THI)'))}</h4>
+    <p class="weather-source-note">${escapeHtml(tr('গণনা করা মান (আবহাওয়া মডেলের ঘণ্টাভিত্তিক তাপমাত্রা ও আর্দ্রতা থেকে, NRC 1971 সূত্র)। সাধারণ গরুর ক্যাটাগরি; স্থানীয় জাতের জন্য যাচাইকৃত নয়।', 'Calculated value (from the model\'s hourly temperature and humidity, NRC 1971 formula). Generic dairy-cattle categories, not validated for local breeds.'))}</p>
+    <div class="hourly-thi-strip">${pills || ''}</div>
+    ${missing ? `<p class="weather-source-note">${escapeHtml(tr(`${num(missing)} ঘণ্টার উপাত্ত অসম্পূর্ণ, তাই বাদ দেওয়া হয়েছে।`, `${missing} hour(s) lack temperature or humidity and are omitted.`))}</p>` : ''}`);
+}
+
+function renderNasaBox(nasa, failure) {
+  if (failure) {
+    setHtml('weatherNasaBox', `<h4>${escapeHtml(tr('নাসা পর্যবেক্ষণ (বিলম্বিত উপাত্ত)', 'NASA observations (delayed data)'))}</h4><p class="weather-source-note">${escapeHtml(failureText(failure))}</p>`);
+    return;
+  }
+  const mm = (v) => (v == null ? '—' : `${num(Number(v).toFixed(1))} ${tr('মিমি', 'mm')}`);
+  const deg = (v) => (v == null ? '—' : `${num(Number(v).toFixed(1))}°C`);
+  setHtml('weatherNasaBox', `<h4>${escapeHtml(tr('নাসা পর্যবেক্ষণ — বিলম্বিত, সরাসরি নয়', 'NASA observations — delayed, not live'))}</h4>
+    <p class="weather-source-note">${escapeHtml(tr(`নাসা পাওয়ার; সর্বশেষ পর্যবেক্ষণ ${isoDate(nasa.latestObservationDate)}। পূর্বাভাস নয়। মাটির আর্দ্রতা (SMAP) এখানে পাওয়া যায় না।`, `NASA POWER; latest observation ${isoDate(nasa.latestObservationDate)}. Not a forecast. SMAP soil moisture is not available here.`))}</p>
+    <ul class="warning-list">
+      <li>${escapeHtml(tr('সর্বশেষ দিনের গড় তাপমাত্রা', 'Latest-day mean temperature'))}: <strong>${deg(nasa.latest.t2m)}</strong></li>
+      <li>${escapeHtml(tr(`${nasa.windowStart} – ${nasa.windowEnd} গড় তাপমাত্রা`, `Mean temperature ${nasa.windowStart} – ${nasa.windowEnd}`))}: <strong>${deg(nasa.meanT2mWindow)}</strong></li>
+      <li>${escapeHtml(tr('একই সময়ের মোট বৃষ্টি', 'Total rain in the same period'))}: <strong>${mm(nasa.rainWindowMm)}</strong> (${num(nasa.rainDaysWithData)}/${num(30)} ${escapeHtml(tr('দিনের উপাত্ত', 'days with data'))})</li>
+    </ul>`);
+}
+
 function renderWeatherForecast(data, location) {
   const forecast = data?.forecast;
   if (!forecast?.current || !Array.isArray(forecast.daily)) return;
@@ -1051,16 +1474,19 @@ function renderWeatherForecast(data, location) {
   const dateFormatter = new Intl.DateTimeFormat(locale, { weekday: 'short', day: 'numeric', month: 'short', timeZone: forecast.timezone || 'Asia/Dhaka' });
   const currentTemp = current.temperatureC == null ? NaN : Number(current.temperatureC);
   const humidity = current.relativeHumidityPct == null ? NaN : Number(current.relativeHumidityPct);
-  const upcomingHours = (forecast.hourly || []).filter(hour => hour.time >= current.time).slice(0, 24);
+  const upcomingHours = (forecast.hourly || []).filter(hour => hour.time >= current.time.slice(0, 13)).slice(0, 24);
   const hasNextDayRain = upcomingHours.length === 24 && upcomingHours.every(hour => hour.precipitationMm != null && Number.isFinite(Number(hour.precipitationMm)));
   const nextDayRain = hasNextDayRain ? upcomingHours.reduce((sum, hour) => sum + Number(hour.precipitationMm), 0) : NaN;
   setText('fwTemp', Number.isFinite(currentTemp) ? `${num(currentTemp.toFixed(1))}°C` : '—');
   setText('fwHumidity', Number.isFinite(humidity) ? `${num(Math.round(humidity))}%` : '—');
   setText('fwRain', Number.isFinite(nextDayRain) ? `${num(nextDayRain.toFixed(1))} ${tr('মিমি', 'mm')}` : '—');
 
-  const modelNotice = lang === 'en' ? forecast.modelNoticeEnglish : forecast.modelNoticeBangla;
   const updateTime = forecast.fetchedAt ? new Date(forecast.fetchedAt).toLocaleString(locale, { dateStyle: 'medium', timeStyle: 'short' }) : '';
-  setHtml('weatherDataNotice', `${escapeHtml(weatherLocationName(location))} · ${escapeHtml(modelNotice || tr('মডেল পূর্বাভাস; স্থানীয় আবহাওয়া ভিন্ন হতে পারে।', 'Model forecast; local conditions may vary.'))}<br>${escapeHtml(tr('সর্বশেষ হালনাগাদ', 'Updated'))}: ${escapeHtml(updateTime)}`);
+  setHtml('weatherDataNotice', `${escapeHtml(weatherLocationName(location))}<br>${escapeHtml(tr('সর্বশেষ হালনাগাদ', 'Updated'))}: ${escapeHtml(updateTime)} · ${escapeHtml(tr('পূর্বাভাস সময় (স্থানীয়)', 'Forecast time (local)'))}: ${escapeHtml(current.time.replace('T', ' '))}`);
+  setText('weatherSourceNote', tr(
+    'সূত্র: Open-Meteo — সংখ্যাভিত্তিক আবহাওয়া মডেলের অনুমান (পূর্বাভাস), স্থানীয় আবহাওয়া স্টেশনের মাপ নয়।',
+    'Source: Open-Meteo — numerical weather-model estimate (forecast), not a local weather-station observation.',
+  ));
   setHtml('weatherForecastList', forecast.daily.map(day => {
     const max = day.temperatureMaxC == null ? NaN : Number(day.temperatureMaxC);
     const min = day.temperatureMinC == null ? NaN : Number(day.temperatureMinC);
@@ -1073,42 +1499,44 @@ function renderWeatherForecast(data, location) {
       <span class="weather-day-rain">${Number.isFinite(rain) ? `${num(rain.toFixed(1))} ${tr('মিমি', 'mm')}` : '—'}</span>
     </div>`;
   }).join(''));
+  renderHourlyThi(forecast);
+  if (weatherNasaData) renderNasaBox(weatherNasaData, null);
 }
 
+let weatherLoadSeq = 0;
 async function loadWeatherForecast() {
   const location = selectedWeatherLocation;
   if (!location) return;
-  setText('weatherDataNotice', tr(
-    `${weatherLocationName(location)}-এর পূর্বাভাস লোড হচ্ছে…`,
-    `Loading the forecast for ${weatherLocationName(location)}…`,
-  ));
-  try {
-    const query = new URLSearchParams({ lat: String(location.lat), lon: String(location.lon) });
-    const response = await fetch(`/api/v1/weather/forecast?${query}`);
-    if (!response.ok) throw new Error(`Forecast request failed: ${response.status}`);
-    const data = await response.json();
-    if (!data.forecast?.current || !Array.isArray(data.forecast.daily)) throw new Error('Forecast data is unavailable');
-    if (selectedWeatherLocation?.id !== location.id) return;
-    weatherForecastData = data;
-    renderWeatherForecast(data, location);
-  } catch (error) {
-    console.error('Weather forecast load error:', error);
-    if (selectedWeatherLocation?.id !== location.id) return;
-    weatherForecastData = null;
-    setText('weatherDataNotice', tr(
-      `${weatherLocationName(location)}-এর পূর্বাভাস আনা যায়নি। সংযোগ পরীক্ষা করে আবার চেষ্টা করুন।`,
-      `Could not load a forecast for ${weatherLocationName(location)}. Check the connection and try another upazila.`,
-    ));
-    setHtml('weatherForecastList', '');
-    setText('fwTemp', '—');
-    setText('fwHumidity', '—');
-    setText('fwRain', '—');
+  const seq = ++weatherLoadSeq;
+  const stale = () => seq !== weatherLoadSeq || selectedWeatherLocation?.id !== location.id;
+  clearWeatherView();
+  showWeatherStatus('info', `${weatherLocationName(location)}-এর আবহাওয়া লোড হচ্ছে…`, `Loading weather for ${weatherLocationName(location)}…`);
+  const query = new URLSearchParams({ lat: String(location.lat), lon: String(location.lon) });
+
+  // The two sources are independent: a NASA outage must not hide the forecast, and vice versa.
+  const [forecastResult, nasaResult] = await Promise.allSettled([
+    apiJson(`/api/v1/weather/forecast?${query}`),
+    apiJson(`/api/v1/weather?${query}`),
+  ]);
+  if (stale()) return;
+
+  if (forecastResult.status === 'fulfilled') {
+    weatherForecastData = forecastResult.value;
+    weatherNasaData = nasaResult.status === 'fulfilled' ? nasaResult.value : null;
+    showWeatherStatus('', '', '');
+    renderWeatherForecast(weatherForecastData, location);
+  } else {
+    console.error('Weather forecast load error:', forecastResult.reason);
+    showWeatherStatus('error', `${weatherLocationName(location)}-এর পূর্বাভাস আনা যায়নি। ${failureText(forecastResult.reason)}`, `Could not load the forecast for ${weatherLocationName(location)}. ${failureText(forecastResult.reason)}`, true);
+    $('weatherRetryBtn')?.setAttribute('data-retry', 'forecast');
   }
+  if (nasaResult.status === 'fulfilled') renderNasaBox(nasaResult.value, null);
+  else renderNasaBox(null, nasaResult.reason);
 }
 
 window.fetchRiverErosion = async function(river) {
   try {
-    const res = await fetch(`/api/v1/erosion?river=${river}`);
+    const res = await api(`/api/v1/erosion?river=${river}`);
     const data = await res.json();
     if (data.corridor && $('erosionStationList')) {
       setHtml('erosionStationList', data.corridor.stations.map(s => {
@@ -1134,40 +1562,59 @@ window.fetchRiverErosion = async function(river) {
   }
 };
 
-window.toggleFarmerAudio = function() {
-  const icon = $('farmerAudioIcon');
-  if (simulatedAudioInterval) {
-    clearInterval(simulatedAudioInterval);
-    simulatedAudioInterval = null;
-    if (icon) icon.textContent = 'play_arrow';
-    if ('speechSynthesis' in window) window.speechSynthesis.cancel();
-    return;
-  }
+let farmerAudioEl = null;
+function setAudioStatus(bn, en) { setText('audioStatusText', tr(bn, en)); }
 
+/** Speaks only text the API produced. Tries the server TTS provider; if it is not configured or fails, falls back to the
+ *  browser's speech engine and says which was used. If neither is available it says so; it never invents a script. */
+window.toggleFarmerAudio = async function() {
+  const icon = $('farmerAudioIcon');
+  const stop = () => {
+    if (farmerAudioEl) { farmerAudioEl.pause(); farmerAudioEl = null; }
+    if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+    if (icon) icon.textContent = 'play_arrow';
+    if ($('audioProgressBar')) $('audioProgressBar').style.width = '0%';
+  };
+  if (audioState === 'playing') { audioState = 'idle'; stop(); return; }
+
+  const script = currentAdvice?.farmer_card?.audioScriptBangla;
+  if (!script) { setAudioStatus('শোনানোর মতো পরামর্শ এখনও লোড হয়নি।', 'There is no advisory text to read yet.'); return; }
+
+  audioState = 'playing';
   if (icon) icon.textContent = 'pause';
-  simulatedAudioProgress = 0;
-  const script = currentAdvice?.farmer_card?.audioScriptBangla || 'আগামী ৪৮ ঘণ্টায় বৃষ্টিপাতের সম্ভাবনা নেই। জমিতে ২ থেকে ৩ ইঞ্চি পানি ধরে রাখুন।';
+  const finish = () => { audioState = 'idle'; stop(); };
+  try {
+    const res = await api('/api/v1/tts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: script, language: 'bn' }) });
+    if (res.ok) {
+      const url = URL.createObjectURL(await res.blob());
+      farmerAudioEl = new Audio(url);
+      farmerAudioEl.ontimeupdate = () => { if (farmerAudioEl?.duration) $('audioProgressBar').style.width = `${(farmerAudioEl.currentTime / farmerAudioEl.duration) * 100}%`; };
+      farmerAudioEl.onended = finish;
+      setAudioStatus('সার্ভারের টেক্সট-টু-স্পিচ ব্যবহার করা হচ্ছে।', 'Playing audio from the server text-to-speech provider.');
+      await farmerAudioEl.play();
+      return;
+    }
+  } catch { /* fall through to on-device speech */ }
 
   if ('speechSynthesis' in window) {
+    const voices = window.speechSynthesis.getVoices();
+    const hasBangla = voices.some(v => /^bn/i.test(v.lang));
+    if (voices.length && !hasBangla) {
+      setAudioStatus('এই ডিভাইসে বাংলা ভয়েস নেই এবং সার্ভারে টিটিএস কনফিগার করা নেই, তাই অডিও চালানো যাচ্ছে না। লিখিত পরামর্শ পড়ুন।', 'No Bangla voice on this device and no server TTS configured, so audio cannot play. Please read the text advisory.');
+      finish();
+      return;
+    }
     const utterance = new SpeechSynthesisUtterance(script);
     utterance.lang = 'bn-BD';
     utterance.rate = 0.95;
-    utterance.onend = () => {
-      if (icon) icon.textContent = 'play_arrow';
-      clearInterval(simulatedAudioInterval);
-      simulatedAudioInterval = null;
-    };
+    utterance.onend = finish;
+    utterance.onerror = finish;
+    setAudioStatus('সার্ভারে টিটিএস কনফিগার করা নেই; ডিভাইসের ভয়েস ব্যবহার করা হচ্ছে।', 'Server TTS is not configured; using this device\'s speech engine.');
     window.speechSynthesis.speak(utterance);
+    return;
   }
-
-  simulatedAudioInterval = setInterval(() => {
-    simulatedAudioProgress += 4;
-    if ($('audioProgressBar')) $('audioProgressBar').style.width = `${Math.min(simulatedAudioProgress, 100)}%`;
-    if (simulatedAudioProgress >= 100) {
-      clearInterval(simulatedAudioInterval);
-      simulatedAudioInterval = null;
-    }
-  }, 1000);
+  setAudioStatus('অডিও চালানো সম্ভব নয়: সার্ভারে টিটিএস নেই এবং এই ব্রাউজার স্পিচ সমর্থন করে না।', 'Audio is unavailable: no server TTS and this browser has no speech support.');
+  finish();
 };
 
 function renderAudioButton() {
@@ -1179,8 +1626,11 @@ function renderAudioButton() {
 
 
 window.requestSaaoCallback = async function() {
-  await simulateFarmerKeypad('9');
-  showToast('cycle-select-toast', tr('কৃষি কর্মকর্তা (SAAO)-কে কল-ব্যাক অনুরোধ সফলভাবে পাঠানো হয়েছে!', 'SAAO call-back request dispatched!'));
+  const result = await simulateFarmerKeypad('9');
+  // The server only records a callback request on the officer desk; no call or SMS is placed.
+  showToast('cycle-select-toast', result?.callbackId
+    ? tr('কল-ব্যাক অনুরোধ কর্মকর্তা ডেস্কে নথিভুক্ত হয়েছে (ডেমো)। কোনো ফোন কল বা এসএমএস করা হয়নি।', 'Callback request recorded on the officer desk (demo). No call or SMS was made.')
+    : tr('কল-ব্যাক অনুরোধ নথিভুক্ত করা যায়নি। আবার চেষ্টা করুন।', 'Could not record the callback request. Please try again.'), 5000);
 };
 
 window.sendAiPrompt = function(promptText) {
@@ -1205,7 +1655,7 @@ window.handleAiChatSubmit = async function(e) {
   input.value = '';
 
   try {
-    const res = await fetch('/api/v1/ai/ask', {
+    const res = await api('/api/v1/ai/ask', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ query }),
@@ -1239,7 +1689,7 @@ window.toggleEditFarm = function() {
     const soil = $('editSoil')?.value || 'পলি দোআঁশ';
     setText('mfArea', area);
     setText('mfSoil', soil);
-    showToast('cycle-select-toast', tr('খামারের তথ্য সফলভাবে সংরক্ষিত হয়েছে!', 'Farm specs successfully saved!'));
+    showToast('cycle-select-toast', tr('খামারের তথ্য শুধু এই পেজে দেখানো হয়েছে; সার্ভারে সংরক্ষিত হয়নি।', 'Farm details are shown on this page only; they were not saved to the server.'));
   }
 };
 
@@ -1248,86 +1698,109 @@ window.toggleEditFarm = function() {
 // ---------------------------------------------------------------------------
 
 window.openRoleModal = function() {
-  $('modal-signin')?.classList.remove('hidden');
+  if (!activeRole) return;
+  renderProfile();
+  $('modal-account')?.classList.remove('hidden');
+  $('modal-account')?.querySelector('button.btn')?.focus();
 };
 
 window.closeRoleModal = function() {
-  $('modal-signin')?.classList.add('hidden');
+  $('modal-account')?.classList.add('hidden');
 };
 
-window.setLoginRole = function(role) {
-  $('loginTabFarmer')?.classList.toggle('btn-primary', role === 'farmer');
-  $('loginTabFarmer')?.classList.toggle('btn-outline', role !== 'farmer');
-  $('loginTabOfficer')?.classList.toggle('btn-primary', role === 'officer');
-  $('loginTabOfficer')?.classList.toggle('btn-outline', role !== 'officer');
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !$('modal-account')?.classList.contains('hidden')) window.closeRoleModal();
+});
 
-  if ($('loginViewFarmer')) $('loginViewFarmer').style.display = role === 'farmer' ? 'block' : 'none';
-  if ($('loginViewOfficer')) $('loginViewOfficer').style.display = role === 'officer' ? 'block' : 'none';
+// ---- Entry screen: role selection ------------------------------------------------------------------------------
+
+window.showEntryStep = function(step) {
+  for (const [id, name] of [['entryChoose', 'choose'], ['entryFarmer', 'farmer'], ['entryOfficer', 'officer']]) {
+    if ($(id)) $(id).hidden = name !== step;
+  }
+  setEntryError('entryFarmerError', '');
+  setEntryError('officerLoginError', '');
+  if (step === 'farmer') $('entryFarmerBtn')?.focus();
+  if (step === 'officer') $('officerSelect')?.focus();
 };
 
-window.fillFarmerDemo = function() {
-  if ($('farmerPhoneInput')) $('farmerPhoneInput').value = '০১৭১১-০০২২৩৩';
-  if ($('farmerNidInput')) $('farmerNidInput').value = '৮৮৯২-৩৪১২-৮৯';
+window.chooseRole = function(role) {
+  if (role === 'visitor') enterPortal('visitor');
+  else if (role === 'farmer') window.showEntryStep('farmer');
+  else if (role === 'officer') {
+    window.showEntryStep('officer');
+    if (!officers.length) loadOfficers();
+  }
 };
 
-window.fillOfficerDemo = function() {
-  if ($('officerIdInput')) $('officerIdInput').value = 'saao_talanda_01';
-  if ($('officerPinInput')) $('officerPinInput').value = 'talanda-demo';
-};
-
-window.handleFarmerLoginSubmit = function(e) {
-  e.preventDefault();
-  const phone = $('farmerPhoneInput')?.value || '০১৭১১-০০২২৩৩';
-  setText('otpTargetText', `${phone} ${tr('নম্বরে ৪ সংখ্যার যাচাইকরণ কোড পাঠানো হয়েছে', '4-digit OTP has been sent to this number')}`);
-  window.closeRoleModal();
-  $('modal-otp')?.classList.remove('hidden');
-};
-
-window.closeOtpModal = function() {
-  $('modal-otp')?.classList.add('hidden');
-};
-
-window.confirmOtpAndLogin = async function() {
+// Demo only: no SMS is sent and no phone number is verified (real SMS OTP needs a provider; see docs/api-contract.md).
+// The server's demo farmer account (F01) is used; the person typing proves nothing about who they are.
+window.farmerDemoSignIn = async function() {
+  setEntryError('entryFarmerError', '');
+  setEntryBusy('entryFarmerBtn', true);
   try {
-    const res = await fetch('/api/v1/auth/login', {
+    const res = await api('/api/v1/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ role: 'farmer', farmerId: 'F01', pin: '1234' }),
     });
-    const data = await res.json();
-    if (res.ok) {
-      authToken = data.token;
-      currentUser = data.user;
-      renderProfile();
-      window.closeOtpModal();
-      showToast('cycle-select-toast', tr('কৃষক প্রোফাইল সফলভাবে যাচাই হয়েছে! স্বাগতম।', 'Farmer login verified successfully! Welcome.'));
-      window.switchScreen('screen-farmer');
+    const data = await res.json().catch(() => null);
+    if (!res.ok || !data?.token) {
+      setEntryError('entryFarmerError', tr('ডেমো সাইন-ইন করা যায়নি।', 'Could not start the demo sign-in.'));
+      return;
     }
-  } catch (err) {
-    window.closeOtpModal();
+    authToken = data.token;
+    currentUser = data.user;
+    try { sessionStorage.setItem(FARMER_KEY, JSON.stringify({ token: data.token, user: data.user })); } catch {}
+    enterPortal('farmer');
+  } catch {
+    setEntryError('entryFarmerError', tr('সার্ভারে পৌঁছানো যায়নি। আবার চেষ্টা করুন।', 'Could not reach the server. Please try again.'));
+  } finally {
+    setEntryBusy('entryFarmerBtn', false);
   }
 };
 
-window.handleOfficerLoginSubmit = async function(e) {
-  e.preventDefault();
-  const officerId = $('officerIdInput')?.value || 'saao_talanda_01';
-  const accessCode = $('officerPinInput')?.value || 'talanda-demo';
-  const res = await fetch('/api/v1/officer/login', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ officerId, accessCode }),
-  });
-  const data = await res.json();
-  if (res.ok) {
-    officerSession = data;
-    currentUser = { id: data.officer.id, role: 'officer', nameBangla: data.officer.nameBangla, blockBangla: data.officer.blockBangla };
-    window.closeRoleModal();
-    renderProfile();
-    await loadOfficerDesk();
-    showToast('cycle-select-toast', tr('কর্মকর্তা যাচাইকরণ সম্পন্ন! কর্মকর্তা ডেস্কে স্বাগতম।', 'Officer verification successful! Welcome to SAAO Desk.'));
-    window.switchScreen('screen-officer');
+/** On load: re-enter a role only for an explicit visitor choice or a demo session the server still accepts. */
+async function restoreSession() {
+  let saved = null;
+  try { saved = sessionStorage.getItem(ROLE_KEY); } catch {}
+  if (!saved) return;
+  if (saved === 'visitor') {
+    enterPortal('visitor');
+    return;
   }
-};
+  if ($('entryChecking')) $('entryChecking').hidden = false;
+  try {
+    if (saved === 'farmer') {
+      const stored = JSON.parse(sessionStorage.getItem(FARMER_KEY) || 'null');
+      if (!stored?.token) throw new Error('no session');
+      const res = await api('/api/v1/auth/session', { headers: { Authorization: `Bearer ${stored.token}` } });
+      if (!res.ok) throw new Error('expired');
+      authToken = stored.token;
+      currentUser = (await res.json()).user || stored.user;
+      enterPortal('farmer');
+    } else if (saved === 'officer') {
+      const stored = JSON.parse(sessionStorage.getItem('eden.officer') || 'null');
+      if (!stored?.token) throw new Error('no session');
+      const res = await api('/api/v1/officer/desk', { headers: { Authorization: `Bearer ${stored.token}` } });
+      if (!res.ok) throw new Error('expired');
+      officerSession = stored;
+      currentUser = { id: stored.officer.id, role: 'officer', nameBangla: stored.officer.nameBangla, blockBangla: stored.officer.blockBangla };
+      officerDesk = await res.json();
+      enterPortal('officer');
+      renderOfficer();
+    }
+  } catch {
+    // Missing, expired or unreachable: stay on the role chooser and drop the stale record.
+    try {
+      sessionStorage.removeItem(ROLE_KEY);
+      sessionStorage.removeItem(FARMER_KEY);
+      sessionStorage.removeItem('eden.officer');
+    } catch {}
+  } finally {
+    if ($('entryChecking')) $('entryChecking').hidden = true;
+  }
+}
 
 // ---------------------------------------------------------------------------
 // SCREEN 8: Narration & IVR Call Delivery
@@ -1336,7 +1809,7 @@ window.handleOfficerLoginSubmit = async function(e) {
 async function loadNarration(option) {
   if (!currentAdvice || !option) return;
   try {
-    const res = await fetch('/api/v1/narrate', {
+    const res = await api('/api/v1/narrate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ advice: currentAdvice, selectedOptionId: option.id }),
@@ -1354,33 +1827,42 @@ function renderNarration() {
   setText('speechDuration', `~${num(currentNarration.durationSecondsEstimate)} ${tr('সেকেন্ড', 'seconds')}`);
 }
 
-window.playCurrentNarration = function() {
+window.playCurrentNarration = async function() {
   if (!currentNarration?.banglaSpeechText) return;
+  try {
+    const res = await api('/api/v1/tts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: currentNarration.banglaSpeechText, language: 'bn' }) });
+    if (res.ok) { new Audio(URL.createObjectURL(await res.blob())).play(); return; }
+  } catch { /* fall back below */ }
   if ('speechSynthesis' in window) {
     const u = new SpeechSynthesisUtterance(currentNarration.banglaSpeechText);
     u.lang = 'bn-BD';
     window.speechSynthesis.speak(u);
+  } else {
+    showToast('cycle-select-toast', tr('অডিও চালানো সম্ভব নয়: কোনো টিটিএস নেই।', 'Audio unavailable: no text-to-speech available.'));
   }
 };
 
 window.simulateFarmerKeypad = async function(key) {
   try {
-    const res = await fetch('/api/v1/channel-events', {
+    const res = await api('/api/v1/channel-events', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ keypad: key, phone: '01711-002233', farmerId: 'F01' }),
     });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
     const data = await res.json();
     const logBox = $('liveCallLog');
     if (logBox) {
-      logBox.innerHTML += `<div style="padding: 4px 0; border-bottom: 1px dashed var(--outline-variant);">[বোতাম ${num(key)}] ${escapeHtml(tr(data.acknowledgementBangla, data.acknowledgementEnglish))}</div>`;
+      logBox.innerHTML += `<div style="padding: 4px 0; border-bottom: 1px dashed var(--outline-variant);">[${tr('সিমুলেটেড বোতাম', 'Simulated key')} ${num(key)}] ${escapeHtml(tr(data.acknowledgementBangla, data.acknowledgementEnglish))}</div>`;
       logBox.scrollTop = logBox.scrollHeight;
     }
     if (key === '9' && officerSession?.token) {
       await loadOfficerDesk();
     }
+    return data;
   } catch (err) {
     console.error('Keypad simulation error:', err);
+    return null;
   }
 };
 
@@ -1410,7 +1892,7 @@ function renderCompanion(advice) {
 
 async function loadDataQualityTable() {
   try {
-    currentDataRelease = await (await fetch('/api/v1/data-release')).json();
+    currentDataRelease = await (await api('/api/v1/data-release')).json();
     renderQuality(currentDataRelease);
   } catch (err) {
     console.error('Failed to load data quality:', err);
@@ -1427,16 +1909,631 @@ document.addEventListener('DOMContentLoaded', async () => {
   try {
     const saved = localStorage.getItem('eden.lang');
     if (saved === 'en' || saved === 'bn') lang = saved;
-    const session = sessionStorage.getItem('eden.officer');
-    if (session) officerSession = JSON.parse(session);
   } catch {}
 
+  // Always start on the role chooser; a role is restored only if its session checks out (see restoreSession).
+  applyRole(null);
   applyStaticText();
+  const restoring = restoreSession();
   await initializeWeatherLocations();
   await loadOverview();
   await window.runPlannerCalculation({ switchScreenAfter: false });
   await loadDataQualityTable();
   await loadOfficers();
-  if (officerSession) await loadOfficerDesk();
+  await restoring;
   renderAll();
 });
+
+// ===========================================================================
+// Screen 11: Cattle AOI Advisory & Data Pipeline Controller
+// ===========================================================================
+
+let cattleAois = [];
+let selectedCattleAoi = null;
+let cattleMap = null;
+let cattleAoiLayer = null;
+let cattleCentroidMarker = null;
+let isDrawingAoi = false;
+let drawingPoints = [];
+let drawingMarkers = [];
+let drawingPolyline = null;
+let activeJobPollInterval = null;
+let currentCattleAdvisory = null;
+let cattleReadiness = null;
+
+window.initCattleScreen = async function() {
+  await window.refreshCattleReadiness();
+  window.initCattleMap();
+  await window.loadCattleAois();
+};
+
+window.initCattleMap = function() {
+  const container = $('cattleMap');
+  if (!container || !window.L) return;
+
+  if (!cattleMap) {
+    cattleMap = L.map('cattleMap').setView([23.7, 90.4], 7); // whole of Bangladesh; draw the farm where it is
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 18,
+      attribution: '© OpenStreetMap contributors'
+    }).addTo(cattleMap);
+
+    cattleMap.on('click', (e) => {
+      if (isDrawingAoi) {
+        window.addDrawingPoint(e.latlng);
+      }
+    });
+  }
+
+  setTimeout(() => {
+    cattleMap.invalidateSize();
+  }, 200);
+};
+
+function showCattleNotice(kind, bn, en) {
+  const box = $('cattleNotice');
+  if (!box) return;
+  box.hidden = !bn;
+  box.className = `alert-box ${kind === 'error' ? 'alert-danger' : kind === 'warning' ? 'alert-warning' : 'alert-info'}`;
+  box.textContent = bn ? tr(bn, en) : '';
+}
+
+window.refreshCattleReadiness = async function() {
+  try {
+    cattleReadiness = await apiJson('/api/v1/cattle/readiness');
+    const ee = cattleReadiness.earthEngine;
+    const badge = $('cattleEeBadge');
+    const banner = $('cattleEeNoticeBanner');
+    const bannerText = $('cattleEeBannerText');
+    const instructions = $('cattleEeSetupInstructions');
+
+    if (ee.status === 'ready') {
+      if (badge) {
+        badge.className = 'badge badge-success';
+        badge.textContent = tr('আর্থ ইঞ্জিন প্রস্তুত (প্রমাণিত সংযোগ)', 'Earth Engine ready (verified connection)');
+      }
+      if (banner) banner.style.display = 'none';
+    } else {
+      if (badge) {
+        badge.className = 'badge badge-warning';
+        badge.textContent = ee.status === 'error' ? tr('আর্থ ইঞ্জিন ত্রুটি', 'Earth Engine error') : tr('আর্থ ইঞ্জিন কনফিগার করা নেই', 'Earth Engine not configured');
+      }
+      if (banner) banner.style.display = 'block';
+      if (bannerText) {
+        bannerText.textContent = tr(
+          `উপগ্রহ উপাত্ত (NDVI, মাটির আর্দ্রতা, বৃষ্টি) এখন পাওয়া যাচ্ছে না: ${ee.details || ''} আবহাওয়া ও THI আলাদাভাবে কাজ করছে।`,
+          `Satellite data (NDVI, soil moisture, rain) is unavailable: ${ee.details || ''} Weather and THI work independently.`,
+        );
+      }
+      if (instructions) instructions.textContent = ee.setupInstructions || '';
+    }
+    if (cattleReadiness.jobs && cattleReadiness.jobs.productionDurable === false) {
+      setText('cattleDurabilityNote', tr(
+        'সতর্কতা: কাজের তালিকা সার্ভারের স্থানীয় ফাইলে থাকে এবং সার্ভার রিস্টার্ট হলে চলমান কাজ থেমে যায় (প্রোডাকশন-উপযোগী নয়)।',
+        'Note: jobs are kept in a local server file and running jobs stop if the server restarts (not production-durable).',
+      ));
+    }
+  } catch (err) {
+    console.warn('Cattle readiness check failed:', err);
+    showCattleNotice('error', `স্ট্যাটাস পরীক্ষা করা যায়নি। ${failureText(err)}`, `Could not check status. ${failureText(err)}`);
+  }
+};
+
+window.loadCattleAois = async function() {
+  try {
+    const data = await apiJson('/api/v1/cattle/aois');
+    cattleAois = data.aois || [];
+
+    const select = $('cattleAoiSelect');
+    if (select) {
+      select.innerHTML = '';
+      if (cattleAois.length === 0) {
+        const opt = document.createElement('option');
+        opt.value = '';
+        opt.textContent = tr('কোন খামার সংরক্ষিত নেই (+ আঁকুন)', 'No farm AOI saved (+ Draw)');
+        select.appendChild(opt);
+      } else {
+        cattleAois.forEach(a => {
+          const opt = document.createElement('option');
+          opt.value = a.aoiId;
+          const haText = lang === 'en' ? `${a.areaHectares} ha` : `${bnDigits(a.areaHectares)} হেক্টর`;
+          opt.textContent = `${a.demo ? tr('[ডেমো] ', '[DEMO] ') : ''}${a.farmLabel} (${haText})`;
+          select.appendChild(opt);
+        });
+      }
+    }
+
+    if (cattleAois.length > 0) {
+      const targetId = selectedCattleAoi ? selectedCattleAoi.aoiId : cattleAois[0].aoiId;
+      window.onSelectCattleAoi(targetId);
+    }
+  } catch (err) {
+    console.error('Failed to load cattle AOIs:', err);
+    showCattleNotice('error', `খামারের তালিকা লোড করা যায়নি। ${failureText(err)}`, `Could not load the farm list. ${failureText(err)}`);
+  }
+};
+
+window.onSelectCattleAoi = async function(aoiId) {
+  if (!aoiId) return;
+  const select = $('cattleAoiSelect');
+  if (select) select.value = aoiId;
+
+  selectedCattleAoi = cattleAois.find(a => a.aoiId === aoiId);
+  if (!selectedCattleAoi) return;
+
+  const haText = lang === 'en'
+    ? `${selectedCattleAoi.areaHectares} ha (${selectedCattleAoi.areaAcres} ac)`
+    : `${bnDigits(selectedCattleAoi.areaHectares)} হেক্টর (${bnDigits(selectedCattleAoi.areaAcres)} একর)`;
+  setText('selectedAoiAreaBadge', haText);
+
+  // Render on Leaflet Map
+  window.renderAoiOnMap(selectedCattleAoi);
+
+  // Load latest advisory (it exists only after a job has really completed)
+  showCattleNotice('', '', '');
+  currentCattleAdvisory = null;
+  window.renderCattleAdvisory(null);
+  try {
+    const data = await apiJson(`/api/v1/cattle/aois/${encodeURIComponent(aoiId)}/advisory`);
+    currentCattleAdvisory = data.advisory;
+    window.renderCattleAdvisory(currentCattleAdvisory);
+  } catch (err) {
+    if (err.kind === 'no_data') showCattleNotice('info', 'এই খামারের জন্য এখনও কোনো পরামর্শ তৈরি হয়নি। "রিফ্রেশ ও বিশ্লেষণ চালান" বাটনে চাপুন।', 'No advisory has been produced for this farm yet. Press "Run refresh & analysis".');
+    else showCattleNotice('error', `পরামর্শ লোড করা যায়নি। ${failureText(err)}`, `Could not load the advisory. ${failureText(err)}`);
+  }
+};
+
+window.renderAoiOnMap = function(aoi) {
+  if (!cattleMap || !window.L) return;
+
+  if (cattleAoiLayer) {
+    cattleMap.removeLayer(cattleAoiLayer);
+    cattleAoiLayer = null;
+  }
+  if (cattleCentroidMarker) {
+    cattleMap.removeLayer(cattleCentroidMarker);
+    cattleCentroidMarker = null;
+  }
+
+  try {
+    cattleAoiLayer = L.geoJSON(aoi.geometry, {
+      style: {
+        color: '#1b5e20',
+        weight: 3,
+        opacity: 0.9,
+        fillColor: '#81c784',
+        fillOpacity: 0.35,
+      }
+    }).addTo(cattleMap);
+
+    const [cLon, cLat] = aoi.centroid;
+    cattleCentroidMarker = L.circleMarker([cLat, cLon], {
+      radius: 6,
+      fillColor: '#d97706',
+      color: '#ffffff',
+      weight: 2,
+      opacity: 1,
+      fillOpacity: 1,
+    }).addTo(cattleMap).bindPopup(`<strong>${escapeHtml(aoi.farmLabel)}</strong><br>${escapeHtml(aoi.nearestUpazila || '')}`);
+
+    cattleMap.fitBounds(cattleAoiLayer.getBounds(), { padding: [30, 30] });
+  } catch (err) {
+    console.warn('Could not render AOI layer on map:', err);
+  }
+};
+
+// Map drawing tools
+window.toggleAoiDrawMode = function() {
+  isDrawingAoi = !isDrawingAoi;
+  const bar = $('drawInstructionsBar');
+  const btn = $('drawAoiBtn');
+  const mapEl = $('cattleMap');
+
+  if (isDrawingAoi) {
+    if (bar) bar.style.display = 'block';
+    if (btn) btn.classList.add('active');
+    if (mapEl) mapEl.classList.add('cattle-drawing-active');
+    window.clearDrawing();
+  } else {
+    window.cancelDrawing();
+  }
+};
+
+window.addDrawingPoint = function(latlng) {
+  if (!cattleMap || !isDrawingAoi) return;
+  drawingPoints.push([latlng.lat, latlng.lng]);
+
+  const marker = L.circleMarker(latlng, {
+    radius: 5,
+    color: '#2563eb',
+    fillColor: '#60a5fa',
+    fillOpacity: 0.8,
+  }).addTo(cattleMap);
+  drawingMarkers.push(marker);
+
+  if (drawingPolyline) {
+    cattleMap.removeLayer(drawingPolyline);
+  }
+  drawingPolyline = L.polyline(drawingPoints, { color: '#2563eb', dashArray: '4, 4' }).addTo(cattleMap);
+};
+
+window.finishCurrentDrawing = async function() {
+  if (drawingPoints.length < 3) {
+    showCattleNotice('error', 'অন্তত ৩টি পয়েন্ট প্রয়োজন।', 'At least 3 points are required.');
+    return;
+  }
+
+  // Close ring: [lon, lat]
+  const ring = drawingPoints.map(p => [Number(p[1].toFixed(6)), Number(p[0].toFixed(6))]);
+  ring.push([ring[0][0], ring[0][1]]); // close ring
+
+  const label = $('drawFarmName')?.value?.trim();
+  if (!label) {
+    showCattleNotice('error', 'খামারের নাম লিখুন।', 'Enter a farm name.');
+    $('drawFarmName')?.focus();
+    return;
+  }
+
+  const payload = {
+    farmLabel: label.trim(),
+    source: 'map_draw',
+    geometry: {
+      type: 'Polygon',
+      coordinates: [ring],
+    },
+  };
+
+  try {
+    const data = await apiJson('/api/v1/cattle/aois', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...cattleWriteHeaders() },
+      body: JSON.stringify(payload),
+    });
+    window.cancelDrawing();
+    await window.loadCattleAois();
+    window.onSelectCattleAoi(data.aoi.aoiId);
+    if (data.job?.jobId) {
+      window.startJobPolling(data.job.jobId);
+    }
+  } catch (err) {
+    showCattleNotice('error', `খামার সংরক্ষণ করা যায়নি: ${failureText(err)}`, `Could not save the farm: ${failureText(err)}`);
+  }
+};
+
+window.cancelDrawing = function() {
+  isDrawingAoi = false;
+  const bar = $('drawInstructionsBar');
+  const btn = $('drawAoiBtn');
+  const mapEl = $('cattleMap');
+  if (bar) bar.style.display = 'none';
+  if (btn) btn.classList.remove('active');
+  if (mapEl) mapEl.classList.remove('cattle-drawing-active');
+  window.clearDrawing();
+};
+
+window.clearDrawing = function() {
+  drawingPoints = [];
+  drawingMarkers.forEach(m => cattleMap?.removeLayer(m));
+  drawingMarkers = [];
+  if (drawingPolyline) {
+    cattleMap?.removeLayer(drawingPolyline);
+    drawingPolyline = null;
+  }
+};
+
+window.handleGeoJsonFileUpload = function(event) {
+  const file = event.target?.files?.[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    try {
+      const text = e.target?.result;
+      const parsed = JSON.parse(text);
+      let geom = parsed;
+      if (parsed.type === 'FeatureCollection' && parsed.features?.[0]?.geometry) {
+        geom = parsed.features[0].geometry;
+      } else if (parsed.type === 'Feature' && parsed.geometry) {
+        geom = parsed.geometry;
+      }
+      $('rawGeoJsonInput').value = JSON.stringify(geom, null, 2);
+      if (!$('customFarmLabel').value) {
+        $('customFarmLabel').value = file.name.replace(/\.[^/.]+$/, '');
+      }
+    } catch (err) {
+      showCattleNotice('error', 'GeoJSON ফাইলটি বৈধ নয়।', 'Invalid GeoJSON file.');
+    }
+  };
+  reader.readAsText(file);
+};
+
+window.saveCustomGeoJsonAoi = async function() {
+  const labelInput = $('customFarmLabel');
+  const jsonInput = $('rawGeoJsonInput');
+  const errBox = $('aoiErrorAlert');
+  if (errBox) errBox.style.display = 'none';
+
+  const label = labelInput?.value?.trim();
+  if (!label) {
+    if (errBox) { errBox.style.display = 'block'; errBox.textContent = tr('খামারের নাম লিখুন।', 'Enter a farm name.'); }
+    return;
+  }
+  const rawText = jsonInput?.value?.trim();
+
+  if (!rawText) {
+    if (errBox) {
+      errBox.style.display = 'block';
+      errBox.textContent = tr('GeoJSON ডেটা প্রদান করুন।', 'Please provide GeoJSON data.');
+    }
+    return;
+  }
+
+  let geometry;
+  try {
+    geometry = JSON.parse(rawText);
+  } catch (e) {
+    if (errBox) {
+      errBox.style.display = 'block';
+      errBox.textContent = tr('অবৈধ JSON সিনট্যাক্স।', 'Invalid JSON syntax.');
+    }
+    return;
+  }
+
+  try {
+    const data = await apiJson('/api/v1/cattle/aois', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...cattleWriteHeaders() },
+      body: JSON.stringify({
+        farmLabel: label,
+        geometry,
+        source: 'geojson_upload',
+      }),
+    });
+
+    if (jsonInput) jsonInput.value = '';
+    if (labelInput) labelInput.value = '';
+    await window.loadCattleAois();
+    window.onSelectCattleAoi(data.aoi.aoiId);
+    if (data.job?.jobId) {
+      window.startJobPolling(data.job.jobId);
+    }
+  } catch (err) {
+    if (errBox) {
+      errBox.style.display = 'block';
+      errBox.textContent = failureText(err);
+    }
+  }
+};
+
+window.deleteSelectedAoi = async function() {
+  if (!selectedCattleAoi) return;
+  if (!confirm(tr(`আপনি কি নিশ্চিত যে "${selectedCattleAoi.farmLabel}" খামারটি মুছে ফেলতে চান?`, `Are you sure you want to delete "${selectedCattleAoi.farmLabel}"?`))) return;
+
+  try {
+    await apiJson(`/api/v1/cattle/aois/${encodeURIComponent(selectedCattleAoi.aoiId)}`, { method: 'DELETE', headers: cattleWriteHeaders() });
+    selectedCattleAoi = null;
+    await window.loadCattleAois();
+  } catch (err) {
+    showCattleNotice('error', `খামার মুছতে ব্যর্থ: ${failureText(err)}`, `Could not delete the farm: ${failureText(err)}`);
+  }
+};
+
+// Optional write token for servers that set API_WRITE_TOKEN. Entered by the user for this session only, never stored in source.
+function cattleWriteHeaders() {
+  const token = sessionStorage.getItem('eden.writeToken');
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+window.setCattleWriteToken = function() {
+  const token = $('cattleWriteToken')?.value?.trim();
+  try { token ? sessionStorage.setItem('eden.writeToken', token) : sessionStorage.removeItem('eden.writeToken'); } catch { /* ignore */ }
+  showCattleNotice('info', 'টোকেন এই ট্যাবের জন্য সংরক্ষিত হয়েছে।', 'Token kept for this browser tab only.');
+};
+
+window.triggerCattlePipelineJob = async function() {
+  if (!selectedCattleAoi) {
+    showCattleNotice('error', 'প্রথমে একটি খামার নির্বাচন করুন।', 'Select a farm first.');
+    return;
+  }
+  const btn = $('runPipelineBtn');
+  if (btn) btn.disabled = true;
+  try {
+    const data = await apiJson('/api/v1/cattle/jobs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...cattleWriteHeaders() },
+      body: JSON.stringify({ aoiId: selectedCattleAoi.aoiId, jobType: 'pipeline_refresh' }),
+    });
+    showCattleNotice('', '', '');
+    window.startJobPolling(data.job.jobId);
+  } catch (err) {
+    showCattleNotice('error', `কাজ শুরু করা যায়নি: ${failureText(err)}`, `Could not start the job: ${failureText(err)}`);
+    if (btn) btn.disabled = false;
+  }
+};
+
+window.retryCattleJob = async function(jobId) {
+  try {
+    const data = await apiJson(`/api/v1/cattle/jobs/${encodeURIComponent(jobId)}/retry`, { method: 'POST', headers: cattleWriteHeaders() });
+    window.startJobPolling(data.job.jobId);
+  } catch (err) {
+    showCattleNotice('error', `পুনরায় চেষ্টা করা যায়নি: ${failureText(err)}`, `Could not retry: ${failureText(err)}`);
+  }
+};
+
+const JOB_STATUS_LABEL = {
+  queued: ['অপেক্ষমাণ', 'Queued', 'badge-info'],
+  running: ['চলমান…', 'Running…', 'badge-info'],
+  succeeded: ['সম্পন্ন ✓ (সব উপাত্ত পাওয়া গেছে)', 'Succeeded ✓ (all inputs obtained)', 'badge-success'],
+  partial: ['আংশিক — কিছু উপাত্ত নেই', 'Partial — some inputs missing', 'badge-warning'],
+  failed: ['ব্যর্থ', 'Failed', 'badge-danger'],
+  blocked: ['আটকে আছে — কনফিগারেশন/উপাত্ত প্রয়োজন', 'Blocked — configuration or data required', 'badge-warning'],
+};
+
+window.startJobPolling = function(jobId) {
+  if (activeJobPollInterval) { clearInterval(activeJobPollInterval); activeJobPollInterval = null; }
+  let consecutiveFailures = 0;
+  const startedAt = Date.now();
+  const stopPolling = () => { clearInterval(activeJobPollInterval); activeJobPollInterval = null; $('runPipelineBtn')?.removeAttribute('disabled'); };
+
+  const poll = async () => {
+    if (Date.now() - startedAt > 5 * 60 * 1000) {
+      stopPolling();
+      showCattleNotice('error', 'কাজের অবস্থা জানার অপেক্ষা সময়সীমা পেরিয়ে গেছে। তালিকা রিফ্রেশ করে দেখুন।', 'Stopped waiting for the job status (timeout). Refresh to check again.');
+      return;
+    }
+    let job;
+    try {
+      job = (await apiJson(`/api/v1/cattle/jobs/${encodeURIComponent(jobId)}`)).job;
+      consecutiveFailures = 0;
+    } catch (err) {
+      if (err.kind === 'not_found') { stopPolling(); showCattleNotice('error', 'কাজটি আর পাওয়া যাচ্ছে না।', 'The job no longer exists.'); return; }
+      if (++consecutiveFailures >= 3) { stopPolling(); showCattleNotice('error', `কাজের অবস্থা আনা যাচ্ছে না। ${failureText(err)}`, `Cannot read the job status. ${failureText(err)}`); }
+      return;
+    }
+
+    const label = JOB_STATUS_LABEL[job.status] || [job.status, job.status, 'badge-info'];
+    const pBar = $('jobProgressBar'); if (pBar) pBar.style.width = `${job.progressPct}%`;
+    setText('jobPercentText', num(`${job.progressPct}%`));
+    setText('jobStageText', lang === 'en' ? job.stageMessage : job.stageMessageBangla);
+    const badge = $('jobStatusBadge');
+    if (badge) { badge.className = `badge ${label[2]}`; badge.textContent = tr(label[0], label[1]); }
+
+    // What is missing / why it failed, so a partial or failed job is never mistaken for a complete one
+    const details = [
+      ...job.missing.map(m => `${m.input}: ${m.reason}`),
+      ...job.errors,
+    ];
+    setHtml('jobDetails', details.length
+      ? `<ul class="warning-list">${details.map(d => `<li>${escapeHtml(d)}</li>`).join('')}</ul>${(job.status === 'failed' || job.status === 'blocked') && job.attempts < job.maxAttempts ? `<button class="btn btn-sm btn-outline" type="button" onclick="retryCattleJob('${escapeHtml(job.jobId)}')">${escapeHtml(tr('আবার চেষ্টা করুন', 'Retry'))}</button>` : ''}`
+      : '');
+
+    if (!['queued', 'running'].includes(job.status)) {
+      stopPolling();
+      if (selectedCattleAoi) {
+        try {
+          const adv = await apiJson(`/api/v1/cattle/aois/${encodeURIComponent(selectedCattleAoi.aoiId)}/advisory`);
+          currentCattleAdvisory = adv.advisory;
+          window.renderCattleAdvisory(currentCattleAdvisory);
+        } catch (err) {
+          if (err.kind !== 'no_data') showCattleNotice('error', `পরামর্শ লোড করা যায়নি। ${failureText(err)}`, `Could not load the advisory. ${failureText(err)}`);
+        }
+      }
+    }
+  };
+  poll();
+  activeJobPollInterval = setInterval(poll, 1500);
+};
+
+const THI_BADGE = {
+  normal: ['badge-success', 'স্বাভাবিক', 'Normal'],
+  alert: ['badge-warning', 'সতর্কতা', 'Alert'],
+  danger: ['badge-danger', 'বিপজ্জনক', 'Danger'],
+  emergency: ['badge-danger', 'জরুরি', 'Emergency'],
+};
+
+window.renderCattleAdvisory = function(adv) {
+  const content = $('cattleAdvisoryContent');
+  if (!adv) {
+    ['cThiVal', 'cWaterVal', 'cNdviVal', 'cGrazingVal', 'coolHoursList'].forEach(id => setText(id, '—'));
+    ['cThiBadge', 'cWaterBadge', 'cGrazingBadge'].forEach(id => { const el = $(id); if (el) { el.className = 'badge'; el.textContent = '—'; } });
+    setText('cThiSummary', '');
+    setHtml('cHourlyStrip', '');
+    setHtml('cattleAdvisoryBullets', '');
+    setHtml('cattleEvidenceNote', '');
+    if (content) content.dataset.empty = 'true';
+    return;
+  }
+  if (content) content.dataset.empty = 'false';
+
+  const thi = adv.derived.thi;
+  const heur = adv.heuristic;
+  const forage = adv.forageStatus;
+
+  // Derived: THI
+  setText('cThiVal', num(thi.current));
+  setText('cThiSummary', lang === 'en' ? heur.summaryEnglish : heur.summaryBangla);
+  const thiBadge = $('cThiBadge');
+  if (thiBadge) {
+    const [cls, bn, en] = THI_BADGE[thi.category];
+    thiBadge.className = `badge ${cls}`;
+    thiBadge.textContent = tr(bn, en);
+  }
+
+  // Heuristic: water demand is categorical only (no invented percentages)
+  setText('cWaterVal', lang === 'en' ? heur.waterDemand.labelEnglish : heur.waterDemand.labelBangla);
+  const waterBadge = $('cWaterBadge');
+  if (waterBadge) {
+    waterBadge.className = `badge ${heur.waterDemand.category === 'normal' ? 'badge-success' : heur.waterDemand.category === 'elevated' ? 'badge-warning' : 'badge-danger'}`;
+    waterBadge.textContent = tr('অনুমান', 'Heuristic');
+  }
+
+  // Measured by satellite: only when Earth Engine returned a real value
+  setText('cNdviVal', forage.ndviProxy !== null ? num(forage.ndviProxy.toFixed(2)) : tr('উপলব্ধ নয়', 'Unavailable'));
+
+  // Heuristic: grazing, derived from THI; no fixed clock windows
+  const g = heur.grazing;
+  setText('cGrazingVal', lang === 'en' ? g.rationaleEnglish : g.rationaleBangla);
+  const grazingBadge = $('cGrazingBadge');
+  if (grazingBadge) {
+    grazingBadge.className = `badge ${g.suitableNow ? 'badge-success' : 'badge-danger'}`;
+    grazingBadge.textContent = g.suitableNow ? tr('তুলনামূলক কম ঝুঁকি', 'Lower risk') : tr('ঝুঁকিপূর্ণ হতে পারে', 'May be risky');
+  }
+
+  setText('coolHoursList', thi.lowestThiHours ? thi.lowestThiHours.map(h => num(h)).join(', ') : tr('উপাত্ত নেই', 'No data'));
+
+  // 24 h strip: each hour uses its own forecast temperature and humidity
+  const strip = $('cHourlyStrip');
+  if (strip) {
+    strip.innerHTML = '';
+    if (!thi.hourly.length) strip.textContent = tr('ঘণ্টাভিত্তিক উপাত্ত নেই।', 'No hourly data.');
+    thi.hourly.forEach(h => {
+      const timeStr = h.time.slice(11, 16);
+      const isCool = (thi.lowestThiHours || []).includes(timeStr);
+      const pill = document.createElement('div');
+      pill.className = `hourly-thi-pill thi-${h.category} ${isCool ? 'cool-feeding' : ''}`;
+      pill.innerHTML = `
+        <span style="font-size: 11px; font-weight: 600; color: var(--on-surface);">${num(timeStr)}</span>
+        <strong style="font-size: 15px; color: var(--primary);">${num(h.thi)}</strong>
+        <span style="font-size: 10px; color: var(--on-surface-variant);">${num(h.temperatureC)}°C · ${num(h.relativeHumidityPct)}%</span>`;
+      strip.appendChild(pill);
+    });
+    if (thi.hoursMissingInputs) {
+      const note = document.createElement('small');
+      note.textContent = tr(`${num(thi.hoursMissingInputs)} ঘণ্টার উপাত্ত অসম্পূর্ণ, বাদ দেওয়া হয়েছে।`, `${thi.hoursMissingInputs} hour(s) omitted: incomplete forecast data.`);
+      strip.appendChild(note);
+    }
+  }
+
+  const bulletList = $('cattleAdvisoryBullets');
+  if (bulletList) {
+    bulletList.innerHTML = '';
+    (lang === 'en' ? heur.bulletsEnglish : heur.bulletsBangla).forEach(b => {
+      const li = document.createElement('li');
+      li.textContent = b;
+      bulletList.appendChild(li);
+    });
+  }
+
+  // Evidence separation: what is measured, what is derived, what is only generic guidance
+  const m = adv.measured;
+  const nasa = 'status' in m.nasaPower
+    ? tr(`নাসা পাওয়ার: উপলব্ধ নয় (${m.nasaPower.reason})`, `NASA POWER: unavailable (${m.nasaPower.reason})`)
+    : tr(`নাসা পাওয়ার (বিলম্বিত, সরাসরি নয়): সর্বশেষ ${isoDate(m.nasaPower.latestObservationDate)}`, `NASA POWER (delayed, not live): latest ${isoDate(m.nasaPower.latestObservationDate)}`);
+  const sat = m.satellite.status === 'unavailable'
+    ? tr(`উপগ্রহ (Earth Engine): উপলব্ধ নয় — ${m.satellite.reason || ''}`, `Satellite (Earth Engine): unavailable — ${m.satellite.reason || ''}`)
+    : tr(`উপগ্রহ (Earth Engine): ${m.satellite.features.length}টি ডেটাসেট${m.satellite.unavailable.length ? `, ${m.satellite.unavailable.length}টি অনুপলব্ধ` : ''}`, `Satellite (Earth Engine): ${m.satellite.features.length} dataset(s)${m.satellite.unavailable.length ? `, ${m.satellite.unavailable.length} unavailable` : ''}`);
+  setHtml('cattleEvidenceNote', `<ul class="warning-list">
+    <li><strong>${escapeHtml(tr('পরিমাপকৃত/প্রদানকৃত', 'Measured / provider data'))}:</strong> ${escapeHtml(tr('আবহাওয়া মডেলের অনুমান (Open-Meteo)', 'Weather-model estimate (Open-Meteo)'))}; ${escapeHtml(nasa)}; ${escapeHtml(sat)}</li>
+    <li><strong>${escapeHtml(tr('গণনা করা', 'Derived'))}:</strong> ${escapeHtml(tr('THI — ' + thi.formula, 'THI — ' + thi.formula))}. ${escapeHtml(thi.thresholdNote)}</li>
+    <li><strong>${escapeHtml(tr('সাধারণ নির্দেশনা (অনুমানভিত্তিক)', 'Generic guidance (heuristic)'))}:</strong> ${escapeHtml(heur.basis)}</li>
+  </ul>`);
+};
+
+window.triggerSupervisedTrainingCheck = async function() {
+  try {
+    const data = await apiJson('/api/v1/cattle/models/train', { method: 'POST', headers: { 'Content-Type': 'application/json', ...cattleWriteHeaders() }, body: JSON.stringify({ target: 'heat_stress_panting' }) });
+    showCattleNotice(data.success ? 'info' : 'warning',
+      `মডেল প্রশিক্ষণ: ${data.status} (নমুনা ${num(data.sampleCount)})। ${data.success ? '' : 'কোনো মডেল তৈরি হয়নি।'}`,
+      `Model training: ${data.status} (samples: ${data.sampleCount}). ${data.success ? '' : 'No model was produced.'} ${data.message}`);
+  } catch (err) {
+    showCattleNotice('error', `প্রশিক্ষণ যাচাই করা যায়নি: ${failureText(err)}`, `Training check failed: ${failureText(err)}`);
+  }
+};

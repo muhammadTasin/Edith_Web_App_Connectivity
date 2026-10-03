@@ -1579,6 +1579,17 @@ input:checked + .slider-round:before {
   body {
     padding-bottom: 74px; /* clearance for mobile nav */
   }
+  .priority-pills-bar {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    overflow: visible;
+  }
+  .priority-pill {
+    justify-content: flex-start;
+    min-width: 0;
+    padding: 8px 10px;
+    white-space: normal;
+  }
   .app-header {
     padding: 8px 12px;
     gap: 8px;
@@ -1639,3 +1650,238 @@ input:checked + .slider-round:before {
     flex-wrap: wrap;
   }
 }
+
+/* ==========================================================================
+   ENTRY / ROLE SELECTION & ROLE-GATED UI
+   Role gating here only hides interface; the API must enforce authorisation.
+   ========================================================================== */
+[hidden] { display: none !important; }
+
+/* Entry state: brand + language only, no dashboard shell */
+body.state-entry .screen-nav,
+body.state-entry .main-container,
+body.state-entry .mobile-bottom-nav,
+body.state-entry .location-badge,
+body.state-entry .release-status,
+body.state-entry .header-story-btn,
+body.state-entry .user-role-trigger { display: none !important; }
+body.state-entry .brand { cursor: default; }
+body:not(.state-entry) .entry-screen { display: none; }
+
+/* A visitor reads weather on the farmer screen's weather panel only */
+body.weather-only .farmer-nav-strip,
+body.weather-only .farmer-panel:not(#f-panel-weather) { display: none !important; }
+
+.entry-screen {
+  min-height: calc(100vh - 69px);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: clamp(24px, 6vw, 72px) 16px 40px;
+  background:
+    radial-gradient(900px 380px at 50% -80px, var(--secondary-container) 0%, transparent 70%),
+    var(--surface);
+}
+.entry-inner { width: 100%; max-width: 980px; }
+.entry-step { animation: fadeIn 0.2s ease-out; }
+.entry-eyebrow {
+  font-size: 13px; font-weight: 700; letter-spacing: 0.04em;
+  color: var(--primary-light); text-align: center; margin-bottom: 6px;
+}
+.entry-screen h1 {
+  font-family: var(--font-serif); font-size: clamp(26px, 4.5vw, 38px);
+  color: var(--primary); text-align: center; line-height: 1.25;
+}
+.entry-lead {
+  max-width: 560px; margin: 10px auto 24px; text-align: center;
+  color: var(--on-surface-variant); font-size: 15px;
+}
+.entry-checking {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  margin: -8px auto 16px; font-size: 13px; color: var(--primary);
+}
+.entry-checking .material-symbols-outlined { animation: entrySpin 1s linear infinite; }
+@keyframes entrySpin { to { transform: rotate(360deg); } }
+
+.role-grid {
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px;
+}
+.role-card {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 8px;
+  text-align: left; font: inherit; color: inherit; cursor: pointer;
+  padding: 22px 20px; min-height: 210px;
+  background: var(--surface-container-lowest);
+  border: 1.5px solid var(--outline-variant); border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  transition: transform 0.15s, box-shadow 0.15s, border-color 0.15s;
+}
+.role-card:hover { transform: translateY(-2px); box-shadow: var(--shadow); border-color: var(--primary-light); }
+.role-card:active { transform: scale(0.99); }
+.role-card:focus-visible, .entry-back:focus-visible {
+  outline: 3px solid var(--tertiary); outline-offset: 3px;
+}
+.role-icon {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 48px; height: 48px; border-radius: 14px; flex-shrink: 0;
+  background: var(--secondary-container); color: var(--primary-light);
+}
+.role-icon .material-symbols-outlined { font-size: 28px; }
+.role-officer .role-icon { background: var(--primary-fixed); color: var(--primary); }
+.role-visitor .role-icon { background: var(--tertiary-container); color: var(--tertiary); }
+.role-name { font-family: var(--font-serif); font-size: 20px; font-weight: 700; color: var(--primary); line-height: 1.25; }
+.role-desc { font-size: 14px; color: var(--on-surface-variant); flex: 1; }
+.role-tag {
+  display: inline-block; padding: 3px 10px; border-radius: var(--radius-full);
+  font-size: 12px; font-weight: 700;
+}
+.tag-open { background: var(--success-container); color: var(--success); }
+.tag-demo { background: var(--warning-container); color: #92400e; }
+
+.entry-foot {
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  margin-top: 22px; font-size: 12.5px; color: var(--on-surface-variant); text-align: center;
+}
+.entry-foot .material-symbols-outlined { font-size: 16px; flex-shrink: 0; }
+
+.entry-form-card {
+  max-width: 460px; margin: 0 auto; padding: 22px 22px 26px;
+  background: var(--surface-container-lowest);
+  border: 1px solid var(--outline-variant); border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+  display: flex; flex-direction: column; gap: 14px;
+}
+.entry-form-card[hidden] { display: none !important; }
+.entry-back {
+  align-self: flex-start; display: inline-flex; align-items: center; gap: 4px;
+  background: none; border: none; cursor: pointer; font: inherit; font-weight: 600;
+  color: var(--primary); padding: 6px 8px 6px 0; min-height: 44px;
+}
+.entry-form-head { display: flex; align-items: center; gap: 14px; }
+.entry-form-head h2 { font-family: var(--font-serif); font-size: 22px; color: var(--primary); margin-bottom: 4px; }
+.entry-notice {
+  background: var(--warning-container); color: #78350f; border-left: 4px solid var(--warning);
+  padding: 10px 12px; border-radius: var(--radius-sm); font-size: 13.5px; font-weight: 600;
+}
+.entry-form { display: flex; flex-direction: column; gap: 14px; }
+.entry-form .form-group { margin-bottom: 0; }
+.entry-error { color: var(--error); font-size: 13px; font-weight: 600; }
+
+.account-summary { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+.account-avatar { width: 44px; height: 44px; font-size: 15px; }
+.account-note { margin-bottom: 14px; }
+.account-actions { display: flex; flex-direction: column; gap: 10px; }
+
+@media (max-width: 860px) {
+  .role-grid { grid-template-columns: 1fr; gap: 12px; }
+  .role-card {
+    min-height: 0; display: grid; grid-template-columns: 48px 1fr; column-gap: 14px; row-gap: 4px; align-items: start;
+  }
+  .role-card .role-icon { grid-row: 1 / span 3; }
+  .role-card .role-tag { justify-self: start; }
+}
+@media (max-width: 768px) {
+  body.state-entry { padding-bottom: 0; }
+  .entry-screen { min-height: calc(100vh - 57px); padding-top: 24px; }
+}
+
+/* ========================================================================== */
+/* Cattle AOI & Advisory Pipeline Styles                                      */
+/* ========================================================================== */
+.alert-box {
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.alert-warning {
+  background: #fffbeb;
+  border: 1px solid #fef3c7;
+  color: #92400e;
+}
+
+.alert-danger {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #b91c1c;
+}
+
+.hourly-thi-pill {
+  flex: 1;
+  min-width: 72px;
+  padding: 10px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-container-low);
+  border: 1px solid var(--outline-variant);
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  transition: transform 0.15s ease;
+}
+
+.hourly-thi-pill:hover {
+  transform: translateY(-2px);
+}
+
+.hourly-thi-pill.cool-feeding {
+  background: #eff6ff;
+  border-color: #93c5fd;
+  box-shadow: 0 1px 3px rgba(37, 99, 235, 0.15);
+}
+
+.hourly-thi-pill.thi-normal {
+  border-top: 3px solid #16a34a;
+}
+
+.hourly-thi-pill.thi-alert {
+  border-top: 3px solid #eab308;
+}
+
+.hourly-thi-pill.thi-danger {
+  border-top: 3px solid #f97316;
+}
+
+.hourly-thi-pill.thi-emergency {
+  border-top: 3px solid #dc2626;
+  background: #fff1f2;
+}
+
+.cattle-drawing-active {
+  cursor: crosshair !important;
+}
+
+
+/* ---- Weather: states, source labels, hourly THI, delayed NASA data ---- */
+.weather-actions { display: flex; gap: 8px; margin: 8px 0; }
+.weather-actions .btn { display: inline-flex; align-items: center; gap: 6px; }
+.weather-status { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; margin: 8px 0; border-radius: var(--radius-sm); border-left: 4px solid var(--outline-variant); background: var(--surface-container-low); font-size: 13.5px; }
+.weather-status[hidden] { display: none; }
+.weather-status-error { border-left-color: var(--error, #b3261e); }
+.weather-status-info { border-left-color: var(--primary); }
+.weather-section { margin-top: 18px; }
+.weather-section h4 { margin: 0 0 6px; font-size: 14px; color: var(--primary); }
+.weather-source-note { margin: 4px 0 10px; font-size: 12px; color: var(--on-surface-variant); line-height: 1.5; }
+.hourly-thi-strip { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 6px; }
+.hourly-thi-strip .hourly-thi-pill { flex: 0 0 auto; min-width: 64px; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px 8px; border-radius: var(--radius-sm); background: var(--surface-container-low); font-size: 11px; }
+.hourly-thi-strip .thi-alert { background: #fef3c7; }
+.hourly-thi-strip .thi-danger { background: #fed7aa; }
+.hourly-thi-strip .thi-emergency { background: #fecaca; }
+#cattleNotice[hidden] { display: none; }
+.alert-danger { background: #fde8e8; border-left: 4px solid #b3261e; padding: 10px 12px; border-radius: var(--radius-sm); font-size: 13px; }
+.alert-info { background: #e8f0fe; border-left: 4px solid #1a56db; padding: 10px 12px; border-radius: var(--radius-sm); font-size: 13px; }
+
+/* Dashboard cattle card */
+#cattleChart { display: flex; align-items: flex-end; gap: 4px; height: 96px; margin: 8px 0; }
+#cattleChart:empty { display: none; }
+.cattle-bar { flex: 1; min-width: 0; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; }
+.cattle-bar-fill { display: block; width: 100%; min-height: 2px; background: var(--outline-variant); border-radius: 3px 3px 0 0; }
+.cattle-bar-fill.is-high { background: var(--error); }
+.cattle-bar-label { font-size: 10px; color: var(--on-surface-variant); margin-top: 2px; }
+.cattle-live { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--outline-variant); }
+.cattle-live h4 { margin: 0 0 6px; font-size: 14px; }
+.cattle-stale { color: #92400e; }
+#cattleOpenBtn { margin-top: 10px; }
+#cattleOpenBtn:focus-visible, .cattle-live .btn:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+@media (max-width: 600px) { #cattleChart { height: 80px; gap: 2px; } .cattle-bar-label { font-size: 9px; } #cattleOpenBtn { width: 100%; } }
