@@ -78,6 +78,10 @@ Prototype values for local demonstration:
 - packages/narration-core/ — Bangla narration and output validation
 - test_pipeline.ts and test_server.js — existing local checks
 
+## Cattle AOI and ML architecture
+
+The proposed cattle-only, farm-AOI data pipeline and model-readiness constraints are documented in [docs/cattle-aoi-ml-architecture.md](docs/cattle-aoi-ml-architecture.md). This is an architecture proposal; Earth Engine extraction and supervised cattle models are not implied to be implemented or configured.
+
 ## Android source repository
 
 [Project EDEN / NASA Space Apps repository](https://github.com/muhammadTasin/project-eden-earth-data-environment-navigator)
